@@ -41,13 +41,32 @@ def classificar_marcador_func(nome, valor, ranges, sexo="Masculino"):
         return "Análise Padrão"
 
 # --- CÉREBRO PRINCIPAL DE ANÁLISE (LAUDOS MÉDICOS) ---
-def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", modulo="", sexo="Masculino"):
+def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", modulo=""):
     try:
         api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return json.dumps({"erro": "Chave da API não encontrada no arquivo .env."})
-            
         client = genai.Client(api_key=api_key)
+        
+        # PROMPT REFORÇADO PARA JSON OBRIGATÓRIO
+        prompt = f"""
+        Atue como um Especialista Clínico.
+        DADOS: {dados_extraidos}
+        CONTEXTO: {contexto_clinico}
+        MÓDULO: {modulo}
+
+        REGRA DE OURO: Retorne APENAS um objeto JSON válido. NÃO escreva explicações antes ou depois. 
+        O JSON deve conter exatamente as chaves: "resumo_executivo", "alertas_vermelhos", "alertas_composicao", "eixo_glicemico", "eixo_hormonal", "eixo_inflamatorio", "insight_medico", "insight_nutricional", "achados".
+        """
+        
+        resposta = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        
+        # LIMPEZA: Remove qualquer texto que não seja JSON (caso o modelo escreva texto extra)
+        import re
+        texto_limpo = re.sub(r'^.*?\{', '{', resposta.text, flags=re.DOTALL)
+        texto_limpo = re.sub(r'\}.*$', '}', texto_limpo, flags=re.DOTALL)
+        
+        return texto_limpo
+    except Exception as e:
+        return json.dumps({"erro": str(e)}) 
         
         # PROMPT 1: ALTA PERFORMANCE E ESPORTE
         if modulo == "Fisiologia do Esporte e Alta Performance":
