@@ -13,6 +13,15 @@ from dotenv import load_dotenv
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Nexus Clínico", page_icon="🧬", layout="wide")
+```python
+# --- ESCONDER MENU DO STREAMLIT ---
+st.markdown("""
+    <style>
+    [data-testid="stHeader"] {visibility: hidden !important;}
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    </style>
+""", unsafe_allow_html=True)
 
 # --- CONEXÃO COM A NUVEM ---
 load_dotenv(override=True)
