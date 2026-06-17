@@ -1,0 +1,45 @@
+=========================================================
+DIRETRIZES CLÍNICAS: MICROBIOLOGIA (CULTURAS E ANTIBIOGRAMA)
+=========================================================
+REFERÊNCIA PRINCIPAL: Protocolos BrCAST / EUCAST e Manuais de Microbiologia Clínica.
+
+1. EXAME DIRETO (COLORAÇÃO DE GRAM)
+- Cocos Gram-positivos: Frequentes em arranjos de "cachos" (sugere Staphylococcus) ou "cadeias" (sugere Streptococcus/Enterococcus).
+- Bacilos Gram-negativos: Bastonetes rosados/avermelhados (sugere Enterobactérias como E. coli, Klebsiella, ou não-fermentadores como Pseudomonas).
+- Bacilos Gram-positivos: Podem sugerir Corynebacterium, Bacillus, Listeria.
+- Leucócitos (Piócitos): A presença moderada a frequente no exame direto a fresco ou Gram indica forte resposta inflamatória local (infecção ativa).
+
+2. CULTURAS E CONTAGEM DE COLÓNIAS (UFC/mL)
+- Urocultura (Jato Médio): 
+  * > 100.000 UFC/mL (10^5): Infecção do Trato Urinário (ITU) confirmada.
+  * 10.000 a 100.000 UFC/mL: Suspeita (avaliar clínica, presença de piócitos ou se o paciente é homem/gestante).
+  * Flora mista (3 ou mais bactérias diferentes): Sugere contaminação na colheita. Solicitar nova amostra.
+- Hemocultura: Qualquer crescimento bacteriano é considerado crítico e possivelmente patogênico (exceto contaminantes clássicos de pele em apenas 1 frasco, como Staphylococcus coagulase-negativa, que exige avaliação clínica).
+- Coprocultura: Pesquisa de patógenos estritos (Salmonella, Shigella, Campylobacter, E. coli patogênicas). A presença da flora normal (E. coli não-patogênica) é ignorada no laudo de patógenos.
+
+3. ANTIBIOGRAMA (TESTE DE SENSIBILIDADE - TSA)
+- S (Sensível): O isolado bacteriano é inibido pela concentração alcançável do antimicrobiano na dosagem padrão.
+- I (Intermediário / Suscetível à Dose Maior): O sucesso clínico é possível se o antibiótico for usado em doses maiores ou concentrado no local da infecção (ex: urina).
+- R (Resistente): O antimicrobiano não será eficaz clinicamente.
+
+4. ALERTAS DE MULTIRRESISTÊNCIA (GATILHOS CLÍNICOS E BIOSSEGURANÇA)
+Sempre que detectar os seguintes padrões no TSA, a IA deve emitir um "ALERTA CRÍTICO" na Análise Fisiopatológica:
+
+- MRSA (Staphylococcus aureus Resistente à Meticilina): 
+  * Gatilho: S. aureus com Resistência (R) à Oxacilina ou Cefoxitina.
+  * Alerta: Bactéria multirresistente. O paciente necessita de isolamento de contato. Opções terapêuticas limitadas (frequentemente Vancomicina, Linezolida, Daptomicina).
+
+- ESBL (Beta-lactamase de Espectro Estendido):
+  * Gatilho: Bacilos Gram-negativos (E. coli, Klebsiella, Proteus) com Resistência (R) a Cefalosporinas de 3ª ou 4ª geração (Ceftriaxona, Cefotaxima, Ceftazidima, Cefepima).
+  * Alerta: Bactéria produtora de ESBL. Tratamento de escolha geralmente recai sobre Carbapenêmicos (Ertapenem, Meropenem).
+
+- KPC / CRE (Enterobactérias Resistentes aos Carbapenêmicos):
+  * Gatilho: Resistência (R) ao Imipenem, Meropenem ou Ertapenem.
+  * Alerta: Microrganismo produtor de Carbapenemase. Isolamento de contato estrito exigido (Biossegurança máxima na enfermaria). Risco de falha terapêutica grave. Acionar Comissão de Controle de Infecção Hospitalar (CCIH).
+
+- VRE (Enterococcus Resistente à Vancomicina):
+  * Gatilho: Enterococcus faecalis ou E. faecium Resistente (R) à Vancomicina.
+  * Alerta: Resistência crítica. Isolamento de contato obrigatório.
+
+5. REGRA DE INTERPRETAÇÃO PARA A IA:
+Se o laudo apresentar uma cultura NEGATIVA, classifique o status como "Normal" e não preencha radar científico. Se a cultura for POSITIVA, liste o microrganismo identificado e classifique como "Alterado". Avalie cuidadosamente a tabela do antibiograma para cruzar com a seção 4 (Alertas de Multirresistência).

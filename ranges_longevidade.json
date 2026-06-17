@@ -1,0 +1,15 @@
+{
+  "Insulina": {"otimo_min": 2.0, "otimo_max": 6.0, "alerta_max": 8.0},
+  "Glicose": {"otimo_min": 80.0, "otimo_max": 90.0, "alerta_max": 99.0},
+  "HOMA-IR": {"otimo_min": 0.0, "otimo_max": 2.0, "alerta_max": 2.5},
+  "Hemoglobina Glicada": {"otimo_min": 0.0, "otimo_max": 5.4, "alerta_max": 5.7},
+  "TSH": {"otimo_min": 1.0, "otimo_max": 2.5, "alerta_max": 3.5},
+  "T3 Livre": {"otimo_min": 2.8, "otimo_max": 10.0, "alerta_max": 4.5},
+  "Testosterona Total": {"otimo_min": 500.0, "otimo_max": 800.0, "alerta_max": 300.0},
+  "Cortisol Basal": {"otimo_min": 10.0, "otimo_max": 16.0, "alerta_max": 20.0},
+  "Triglicerídeos": {"otimo_min": 0.0, "otimo_max": 100.0, "alerta_max": 150.0},
+  "Colesterol HDL": {"otimo_min": 50.0, "otimo_max": 100.0, "alerta_max": 40.0},
+  "PCR ultrassensível": {"otimo_min": 0.0, "otimo_max": 1.0, "alerta_max": 3.0},
+  "Vitamina D3": {"otimo_min": 40.0, "otimo_max": 60.0, "alerta_max": 20.0},
+  "Vitamina B12": {"otimo_min": 500.0, "otimo_max": 1500.0, "alerta_max": 200.0}
+}

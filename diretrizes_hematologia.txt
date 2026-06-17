@@ -1,0 +1,49 @@
+=========================================================
+DIRETRIZES CLÍNICAS: HEMATOLOGIA (HEMOGRAMA COMPLETO)
+=========================================================
+REFERÊNCIA PRINCIPAL: Padrões hematológicos para adultos.
+
+1. SÉRIE VERMELHA (ERITROGRAMA)
+- Hemácias (Eritrócitos): Homens (4.5 a 5.9 milhões/mm³) | Mulheres (4.0 a 5.2 milhões/mm³)
+- Hemoglobina (Hb): Homens (13.5 a 17.5 g/dL) | Mulheres (12.0 a 16.0 g/dL) -> Abaixo do limite inferior: ANEMIA.
+- Hematócrito (Ht): Homens (41% a 53%) | Mulheres (36% a 46%)
+
+Índices Hematimétricos (Regras de Cálculo e Classificação):
+- VCM (Volume Corpuscular Médio): 80 a 100 fL. (Fórmula: Ht / Hemácias x 10)
+  * VCM < 80: Microcitose.
+  * VCM > 100: Macrocitose.
+- HCM (Hemoglobina Corpuscular Média): 27 a 32 pg. (Fórmula: Hb / Hemácias x 10)
+  * HCM < 27: Hipocromia.
+- CHCM (Concentração de Hemoglobina Corpuscular Média): 32 a 36 g/dL. (Fórmula: Hb / Ht x 100)
+- RDW (Amplitude de Distribuição dos Eritrócitos): 11.5% a 14.5%.
+  * RDW > 14.5%: Anisocitose (heterogeneidade no tamanho celular, comum em ferropenia inicial ou deficiência de B12).
+
+CORRELAÇÃO CLÍNICA - ANEMIAS:
+- Anemia Microcítica e Hipocrômica: Hb baixa, VCM < 80 e HCM < 27. (Suspeita principal: Anemia Ferropriva ou Talassemia).
+- Anemia Macrocítica: Hb baixa, VCM > 100. (Suspeita principal: Deficiência de B12/Ácido Fólico ou disfunção hepática).
+- Anemia Normocítica e Normocrômica: Hb baixa, VCM e HCM normais. (Suspeita principal: Doença crônica, doença renal ou perda aguda de sangue).
+
+2. SÉRIE BRANCA (LEUCOGRAMA)
+- Leucócitos Totais: 4.500 a 11.000 /mm³.
+  * < 4.500: Leucopenia.
+  * > 11.000: Leucocitose.
+
+Fórmula Leucocitária (Valores Relativos e Absolutos):
+- Neutrófilos Bastonetes (Imaturos): 0% a 5% (0 a 500 /mm³).
+  * Bastões > 5% ou > 500, ou presença de precursores (metamielócitos, mielócitos): DESVIO À ESQUERDA (forte indício de infecção bacteriana aguda ou inflamação intensa).
+- Neutrófilos Segmentados: 45% a 70% (2.500 a 7.500 /mm³).
+  * Aumento: Neutrofilia (infecções bacterianas, estresse agudo).
+- Eosinófilos: 1% a 5% (50 a 500 /mm³).
+  * Aumento: Eosinofilia (processos alérgicos ou parasitoses intestinais/teciduais).
+- Basófilos: 0% a 1% (0 a 100 /mm³).
+- Linfócitos: 20% a 40% (1.500 a 4.000 /mm³).
+  * Aumento: Linfocitose (infecções virais agudas ou crônicas).
+  * ALERTA MORFOLÓGICO: Presença de "Linfócitos Reativos" ou "Atípicos" descrita nas observações sugere forte resposta viral (ex: Mononucleose, Dengue, Citomegalovírus).
+- Monócitos: 2% a 10% (100 a 1.000 /mm³).
+  * Aumento: Monocitose (fase de recuperação de infecções, inflamações crônicas).
+
+3. PLAQUETAS (PLAQUETOGRAMA)
+- Contagem Total: 150.000 a 450.000 /mm³.
+  * < 150.000: Trombocitopenia (risco de sangramento, comum em dengue ou distúrbios de medula).
+  * > 450.000: Trombocitose (risco trombótico ou reativo a inflamação/ferropenia severa).
+- VPM (Volume Plaquetário Médio): 7.0 a 11.0 fL.

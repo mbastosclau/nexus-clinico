@@ -1,0 +1,7 @@
+streamlit
+supabase
+python-dotenv
+PyPDF2
+pandas
+numpy
+google-genai

@@ -1,0 +1,52 @@
+=== FONTE: CFF ENCARTE ANALISES CLINICAS.pdf ===
+REGRAS DE DECISÃO CLÍNICA - PRÉ-ANALÍTICA E VARIAÇÃO BIOLÓGICA (CFF):
+1. Fatores Pré-Analíticos: As alterações em resultados laboratoriais devem ser analisadas considerando potenciais erros pré-analíticos, como o tempo de garroteamento prolongado e o tempo adequado de jejum.
+2. Variação Biológica: Os níveis de Triglicerídeos sofrem expressiva variação biológica fisiológica intraindividual, na ordem dos 22%.
+CRUZAMENTO OBRIGATÓRIO: Considerar a fase pré-analítica antes de determinar um diagnóstico patológico perante desvios laboratoriais ligeiros.
+
+=== FONTE: consenso_jejum_dez2016_final.pdf ===
+REGRAS DE DECISÃO CLÍNICA - FLEXIBILIZAÇÃO DO JEJUM:
+1. Perfil Lipídico: A avaliação laboratorial do perfil lipídico (Colesterol Total, LDL-C, HDL-C, não-HDL-C e Triglicerídeos) pode ser realizada com flexibilização da necessidade de jejum.
+2. Risco Cardiovascular: A colheita no estado pós-prandial representa de forma mais eficaz o potencial impacto no risco cardiovascular.
+
+=== FONTE: DiretrizDislipidemias_2017.pdf ===
+REGRAS DE DECISÃO CLÍNICA - PERFIL LIPÍDICO E RISCO CARDIOVASCULAR (SBC):
+1. Colesterol Total: O valor desejável é < 190 mg/dL.
+2. HDL-C: O valor desejável é > 40 mg/dL.
+3. Triglicerídeos: O valor desejável é < 150 mg/dL (com jejum) ou < 175 mg/dL (sem jejum).
+4. LDL-C: A meta terapêutica depende exclusivamente da estratificação do risco cardiovascular. Risco Baixo < 130 mg/dL; Risco Intermediário < 100 mg/dL; Risco Alto < 70 mg/dL; Risco Muito Alto < 50 mg/dL.
+5. Fórmula de Friedewald: Torna-se inadequada para o cálculo do LDL-c se os Triglicerídeos forem >= 400 mg/dL.
+CRUZAMENTO OBRIGATÓRIO: O perfil lipídico deve ser avaliado de acordo com a indicação, o estado metabólico e a estratificação de risco, evitando a análise isolada das partículas.
+
+=== FONTE: exames_erros_wilson_nov2017.pdf ===
+REGRAS DE DECISÃO CLÍNICA - SEGURANÇA E ERROS DIAGNÓSTICOS:
+1. Impacto: Estima-se que o laboratório clínico contribua com cerca de 70% dos dados utilizados pelos médicos para as suas tomadas de decisão clínica.
+2. Prevenção de Erros: A avaliação laboratorial exige correlação clínica estrita, dado que falhas diagnósticas afetam diretamente o prognóstico do paciente.
+
+=== FONTE: ExamesLabMedEmergencia_Recomenda.pdf ===
+REGRAS DE DECISÃO CLÍNICA - MEDICINA DE EMERGÊNCIA (SBPC/ML):
+1. Troponina de Alta Sensibilidade (hs-cTn): Utilizar algoritmos rápidos (0/1 hora), permitindo que, logo na primeira hora de admissão, mais de 75% dos pacientes sejam excluídos com segurança do diagnóstico de enfarte agudo do miocárdio.
+2. Testes Laboratoriais Remotos (TLR): A utilização de TLR associada a protocolos clínicos específicos ajuda a reduzir o tempo de decisão em ambiente de urgência.
+CRUZAMENTO OBRIGATÓRIO: Os resultados na urgência requerem enquadramento estrito com os protocolos assistenciais e o tempo de evolução dos sintomas.
+
+=== FONTE: ExamesUrina_v2 SBPC.pdf ===
+REGRAS DE DECISÃO CLÍNICA - UROANÁLISE E AVALIAÇÃO RENAL:
+1. Exame Físico-Químico e Sedimento: Constitui um recurso valioso para o diagnóstico de doenças renais, metabólicas e infeciosas, dependendo sempre da avaliação integral dos elementos.
+2. Elementos Formados: A presença de cilindros, células (eritrócitos dismórficos, leucócitos) e cristais patológicos deve ser avaliada para determinar a localização anatómica do dano.
+CRUZAMENTO OBRIGATÓRIO: Cruzar achados do sedimento (como hematúria dismórfica) com estimativas da taxa de filtração glomerular e albuminúria para diferenciar causas urológicas de lesão do parênquima renal.
+
+=== FONTE: HemoglobinaGlicada2017.pdf ===
+REGRAS DE DECISÃO CLÍNICA - METABOLISMO GLICÍDICO (SBD/SBPC-ML):
+1. Hemoglobina Glicada (HbA1c): Normal < 5,7%; Pré-diabetes (Risco aumentado): 5,7% a 6,4%; Diabetes Mellitus: >= 6,5%.
+2. Glicemia de Jejum: Normal < 100 mg/dL; Glicemia de jejum alterada: 100 a 125 mg/dL; Diabetes: >= 126 mg/dL.
+CRUZAMENTO OBRIGATÓRIO: Um resultado de Glicemia de jejum alterada deve ser obrigatoriamente cruzado com a HbA1c para fechar um diagnóstico definitivo de diabetes ou pré-diabetes.
+
+=== FONTE: Nota_jejum_junho2016.pdf ===
+REGRAS DE DECISÃO CLÍNICA - PADRONIZAÇÃO DO JEJUM:
+1. Jejum Habitual: O período de jejum para a rotina de colheitas de sangue pode ser reduzido a 4 horas para a vasta maioria dos exames, abandonando a rigidez das 8 a 12 horas.
+2. Cruzamento Analítico: O tempo exato de jejum deve ser documentado, visto que as refeições podem alterar a composição sanguínea e os limites de referência momentaneamente.
+
+=== FONTE: NotaTecnicaTesteToleranciaInsulina_SBPCML_SBEM_2025.pdf ===
+REGRAS DE DECISÃO CLÍNICA - EIXO HORMONAL:
+1. Avaliação Hipofisária: O Teste de Tolerância à Insulina (ITT) é considerado o método padrão-ouro para avaliar a integridade do eixo somatotrópico (GH) e hipotalâmico-hipofisário-adrenal.
+2. Insulina Regular: A utilização da insulina regular humana (insulina R) é o método essencial para a indução controlada da hipoglicemia exigida no teste.
