@@ -244,6 +244,26 @@ def baixar_html(html_string, nome_arquivo):
     b64 = base64.b64encode(html_string.encode()).decode()
     return f'<br><a href="data:text/html;base64,{b64}" download="{nome_arquivo}.html" class="stButton" style="text-decoration:none; display:inline-block; padding:12px 24px; background:linear-gradient(145deg, #0284c7, #0369a1); color:white; border-radius:10px; font-weight:bold; box-shadow: 4px 4px 10px rgba(0,0,0,0.5);">📥 Baixar Dossiê (HTML)</a>'
 
+def gerar_html_cardapio(paciente, cardapio_md):
+    import re
+    html_cardapio = cardapio_md.replace('\n', '<br>')
+    html_cardapio = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', html_cardapio)
+    html_cardapio = re.sub(r'\*(.*?)\*', r'<i>\1</i>', html_cardapio)
+    html_cardapio = re.sub(r'### (.*?)<br>', r'<h3>\1</h3>', html_cardapio)
+    html_cardapio = re.sub(r'## (.*?)<br>', r'<h2>\1</h2>', html_cardapio)
+    
+    html = f"""
+    <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Cardápio - {paciente}</title>
+    <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }}</style>
+    </head><body>
+    <h1 style="text-align:center;color:#1e3a8a;">Prescrição Dietética Semanal</h1>
+    <h3 style="text-align:center;">Paciente: {paciente}</h3>
+    <hr>
+    <div>{html_cardapio}</div>
+    </body></html>
+    """
+    return html
+    
 def gerar_html_evolucao(paciente, parecer_md):
     html_content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', parecer_md)
     html_content = re.sub(r'### (.*)', r'<h3>\1</h3>', html_content)
@@ -415,6 +435,9 @@ else:
     # ==========================================
     # ABA 1: DASHBOARD
     # ==========================================
+    # ==========================================
+    # ABA 1: DASHBOARD
+    # ==========================================
     with aba_dashboard:
         caminho_arquivo = os.path.join(PASTA_BD, f"{paciente_ativo}.json")
         if os.path.exists(caminho_arquivo):
@@ -422,6 +445,25 @@ else:
                 try: hist_paciente = json.load(f)
                 except: hist_paciente = []
             
+            # --- NOVO BLOCO: PERSISTÊNCIA E EXIBIÇÃO DO ÚLTIMO LAUDO ---
+            if hist_paciente:
+                ultimo_laudo = hist_paciente[-1]['laudo']
+                data_laudo = hist_paciente[-1]['data']
+                st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
+                st.subheader(f"📄 Último Laudo Gerado: {data_laudo}")
+                
+                st.markdown("#### 🧬 Análise Metabólica Cruzada")
+                colA, colB, colC = st.columns(3)
+                with colA: st.info(f"**Eixo Glicêmico:**\n\n{ultimo_laudo.get('eixo_glicemico', '...')}")
+                with colB: st.info(f"**Eixo Hormonal:**\n\n{ultimo_laudo.get('eixo_hormonal', '...')}")
+                with colC: st.info(f"**Eixo Inflamatório:**\n\n{ultimo_laudo.get('eixo_inflamatorio', '...')}")
+                
+                st.markdown("#### 🎯 Insights de Conduta")
+                st.success(f"**Médica:** {ultimo_laudo.get('insight_medico', '...')}")
+                st.success(f"**Nutricional:** {ultimo_laudo.get('insight_nutricional', '...')}")
+                st.markdown("</div>", unsafe_allow_html=True)
+            # --- FIM DO NOVO BLOCO ---
+
             st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
             st.subheader("📈 Evolução de Biomarcadores")
             dados_evolucao = extrair_valores_historico(hist_paciente)
@@ -810,14 +852,36 @@ else:
                 with col_cfg2:
                     restricoes = st.text_input("Restrições e Preferências:", placeholder="Ex: Alérgico a castanhas, treina às 19h...")
                     
+                # --- NOVO: PERSISTÊNCIA E DOWNLOAD DO CARDÁPIO ---
+                caminho_cardapio = os.path.join(PASTA_BD, f"{paciente_ativo}_cardapio.json")
+                
                 if st.button("🍽️ Gerar Cardápio Semanal Sob Medida", use_container_width=True):
                     with st.spinner("Construindo as refeições..."):
                         cardapio_gerado = analisador.gerar_cardapio_semanal(paciente_ativo, laudo_recente, estrategia_escolhida, restricoes)
-                        st.success("Cardápio formulado com sucesso!")
+                        
+                        # Salvar cardapio para não perder no F5
+                        with open(caminho_cardapio, 'w', encoding='utf-8') as fc:
+                            json.dump({"cardapio": cardapio_gerado}, fc, ensure_ascii=False)
+                            
+                        st.rerun() # Atualiza a página para exibir o cardápio salvo
+                
+                # Exibir cardápio persistido na tela
+                if os.path.exists(caminho_cardapio):
+                    with open(caminho_cardapio, 'r', encoding='utf-8') as fc:
+                        dados_c = json.load(fc)
+                        cardapio_gerado = dados_c.get("cardapio", "")
+                        
+                    if cardapio_gerado:
+                        st.success("Último Cardápio formulado carregado com sucesso!")
+                        
+                        # Botão de Download HTML
+                        html_c = gerar_html_cardapio(paciente_ativo, cardapio_gerado)
+                        st.markdown(baixar_html(html_c, f"Cardapio_{paciente_ativo}"), unsafe_allow_html=True)
+                        
                         st.markdown("<div style='background: rgba(15, 23, 42, 0.5); padding:20px; border-radius:10px;'>", unsafe_allow_html=True)
                         st.markdown(cardapio_gerado)
                         st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown("</div>", unsafe_allow_html=True)
+                # ---------------------------------------------------
 
     # ==========================================
     # ABA 6: MICROSCOPIA E VISÃO COMPUTACIONAL
