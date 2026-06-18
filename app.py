@@ -311,7 +311,6 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
 
     html_calculos = f"<h2>🧮 Calculadoras de Risco</h2><div style='background-color: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e2e8f0;'>{calculos_html}</div>" if calculos_html else ""
 
-    # Agora o Painel Completo também é considerado um módulo avançado!
     modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
     
     if modulo in modulos_avancados:
@@ -320,7 +319,6 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
         alertas_inbody = "".join([f"<li>{a}</li>" for a in dados_json.get('alertas_composicao', [])])
         caixa_inbody = f"<div class='alert-box' style='background-color: #fffbeb; border-color: #f59e0b; color: #b45309;'><strong>⚖️ Alertas de Composição Corporal:</strong><br><ul>{alertas_inbody}</ul></div>" if alertas_inbody else ""
         
-        # --- INCLUSÃO DOS MACROS DIRETAMENTE NO LAUDO HTML ---
         macros = dados_json.get('estrategia_nutricional', {})
         html_macros = ""
         if isinstance(macros, dict) and macros.get('macros'):
@@ -360,29 +358,18 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
         <div class="footer">Gerado por Nexus Clínico - Suporte à Decisão de Alta Performance.</div></body></html>
         """
         return html
-    else:
-        # Laudo básico para módulos não avançados
-        html = f"""
-        <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo Clínico</title>
-        <style>body {{ font-family: sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }} th, td {{ padding: 10px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }}</style>
-        </head><body><h1 style="text-align: center; color: #1e3a8a;">LAUDO CLÍNICO ESPECIALIZADO</h1><p><strong>Paciente:</strong> {paciente} | <strong>Data:</strong> {data} | <strong>Módulo:</strong> {modulo}</p>
-        <h3>Resumo Clínico</h3><p>{dados_json.get('resumo_clinico', '')}</p>{html_calculos}
-        <h3>Detalhamento (Marcadores)</h3><table><tr><th>Marcador</th><th>Resultado / Status</th><th>Referência Laboratorial</th><th>Análise</th></tr>{linhas_tabela}</table>
-        </body></html>
-        """
-        return html
     elif modulo == "Microbiologia (Cultura e Antibiograma)":
         bacterias = "".join([f"<li>{b}</li>" for b in dados_json.get('bacterias_isoladas', [])])
         caixa_bacterias = f"<div class='alert-box'><strong>🔬 Microrganismos Isolados:</strong><ul>{bacterias}</ul></div>" if bacterias else "<div class='insight-box'><strong>🔬 Cultura Negativa / Flora Normal</strong></div>"
         
         sensiveis = "<br>".join([f"✅ {s}" for s in dados_json.get('antibioticos_sensiveis', [])])
-        resistentes = "<br>".join([f"🚨 {r}" for r in dados_json.get('antibioticos_resistentes', [])])
+        resistentes = "<br>".join([f"❌ {r}" for s in dados_json.get('antibioticos_resistentes', [])])
         
         html = f"""
-        <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Dossiê Microbiológico - {paciente}</title>
-        <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .alert-box {{ background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; }} .insight-box {{ background-color: #f0fdf4; border-left: 5px solid #22c55e; padding: 15px; margin-bottom: 15px; }} .eixo-box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 15px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95em; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }} th, td {{ padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
+        <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo - {paciente}</title>
+        <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .alert-box {{ background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; }} .eixo-box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 15px; }} .insight-box {{ background-color: #f0fdf4; border-left: 5px solid #22c55e; padding: 15px; margin-bottom: 15px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95em; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }} th, td {{ padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
         </head><body>
-        <div class="header"><h1>LAUDO MICROBIOLÓGICO E INFECIOSO</h1><h3>Avaliação de Cultura e Antibiograma</h3></div>
+        <div class="header"><h1>LAUDO MICROBIOLÓGICO E INFECCIOSO</h1><h3>Avaliação de Cultura e Antibiograma</h3></div>
         <p><strong>Paciente:</strong> {paciente} | <strong>Data:</strong> {data}</p>
         <h2>📋 Resumo Clínico</h2><p>{dados_json.get('resumo_clinico', '')}</p>
         {caixa_bacterias}
@@ -409,8 +396,7 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
         </body></html>
         """
         return html
-
-# --- GESTÃO NO MENU LATERAL ---
+        # --- GESTÃO NO MENU LATERAL ---
 st.sidebar.title("👥 Gestão de Pacientes")
 pacientes_salvos = [f.replace('.json', '') for f in os.listdir(PASTA_BD) if f.endswith('.json')]
 opcao_paciente = st.sidebar.radio("Ação:", ["Selecionar Existente", "Novo Paciente"])
