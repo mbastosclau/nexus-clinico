@@ -93,8 +93,8 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             }}
             """
             
-        # PROMPT 2: ENDOCRINOLOGIA E EMAGRECIMENTO
-        elif modulo == "Performance, Emagrecimento e Endocrinologia":
+        # PROMPT 2: ENDOCRINOLOGIA, EMAGRECIMENTO E PAINEL COMPLETO
+        elif modulo in ["Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]:
             prompt = f"""
             Atue como um Copiloto Médico Sênior (Cardiologista, Endocrinologista e Nutricionista Clínico).
             DADOS DO EXAME: {dados_extraidos}
@@ -201,7 +201,7 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             }, ensure_ascii=False)
 
         # Aplicador automático da sua biblioteca de Ranges Inteligentes
-        if modulo in ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia"]:
+        if modulo in ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]:
             arquivo_ranges = 'ranges_alta_performance.json' if modulo == "Fisiologia do Esporte e Alta Performance" else 'ranges_longevidade.json'
             try:
                 with open(arquivo_ranges, 'r', encoding='utf-8') as f:
