@@ -413,7 +413,7 @@ else:
     aba_dashboard, aba_analise, aba_familia, aba_taco, aba_cardapio, aba_microscopia = st.tabs(["📊 Dashboard & Evolução", "🔬 Nova Análise Laboratorial", "👨‍👩‍👧‍👦 Sincronização Familiar", "🍎 Consulta TACO", "🍽️ Prescrição de Cardápio", "🧫 Microscopia Avançada"])
 
     # ==========================================
-    # ABA 1: DASHBOARD (INTEGRADA)
+    # ABA 1: DASHBOARD
     # ==========================================
     with aba_dashboard:
         caminho_arquivo = os.path.join(PASTA_BD, f"{paciente_ativo}.json")
@@ -421,35 +421,58 @@ else:
             with open(caminho_arquivo, 'r', encoding='utf-8') as f: 
                 try: hist_paciente = json.load(f)
                 except: hist_paciente = []
-
-            # --- NOVO BLOCO: PERSISTÊNCIA E EXIBIÇÃO DO ÚLTIMO LAUDO ---
-            if hist_paciente:
-                ultimo_laudo = hist_paciente[-1]['laudo']
-                data_laudo = hist_paciente[-1]['data']
-                st.subheader(f"📄 Último Laudo Gerado: {data_laudo}")
-                
-                # Botão de Download (Persistente)
-                html_laudo = analisador.gerar_html_laudo(paciente_ativo, data_laudo, "Geral", ultimo_laudo, "")
-                st.markdown(baixar_html(html_laudo, f"Laudo_{paciente_ativo}_{data_laudo}"), unsafe_allow_html=True)
-                
-                # Exibição dos Eixos e Insights
-                st.markdown("#### 🧬 Análise Metabólica Cruzada")
-                colA, colB, colC = st.columns(3)
-                with colA: st.info(f"**Eixo Glicêmico:**\n\n{ultimo_laudo.get('eixo_glicemico', '...')}")
-                with colB: st.info(f"**Eixo Hormonal:**\n\n{ultimo_laudo.get('eixo_hormonal', '...')}")
-                with colC: st.info(f"**Eixo Inflamatório:**\n\n{ultimo_laudo.get('eixo_inflamatorio', '...')}")
-                
-                st.markdown("#### 🎯 Insights de Conduta")
-                st.success(f"**Médica:** {ultimo_laudo.get('insight_medico', '...')}")
-                st.success(f"**Nutricional:** {ultimo_laudo.get('insight_nutricional', '...')}")
-                st.markdown("---")
-            # --- FIM DO NOVO BLOCO ---
             
             st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
             st.subheader("📈 Evolução de Biomarcadores")
             dados_evolucao = extrair_valores_historico(hist_paciente)
-            # ... [CONTINUE COM O SEU CÓDIGO ORIGINAL DOS GRÁFICOS ABAIXO] ...
-    
+            if dados_evolucao and len(dados_evolucao) > 0:
+                df = pd.DataFrame(dados_evolucao)
+                try: df["Data"] = pd.to_datetime(df["Data"]); df = df.set_index("Data").sort_index()
+                except: df = df.set_index("Data")
+                
+                st.markdown("#### 🩸 Eixo Glicêmico e Resistência à Insulina")
+                cg1, cg2, cg3 = st.columns(3)
+                with cg1:
+                    if "Glicemia" in df.columns: st.markdown("**Glicemia de Jejum**"); st.line_chart(df[["Glicemia"]].dropna(), color="#3b82f6")
+                with cg2:
+                    if "HbA1c" in df.columns: st.markdown("**HbA1c (%)**"); st.line_chart(df[["HbA1c"]].dropna(), color="#f59e0b")
+                with cg3:
+                    if "HOMA-IR" in df.columns: st.markdown("**HOMA-IR**"); st.line_chart(df[["HOMA-IR"]].dropna(), color="#dc2626")
+
+                st.markdown("#### 🫀 Perfil Lipídico e Risco Cardiovascular")
+                cl1, cl2, cl3, cl4 = st.columns(4)
+                with cl1:
+                    if "Colesterol Total" in df.columns: st.markdown("**Col. Total**"); st.line_chart(df[["Colesterol Total"]].dropna(), color="#64748b")
+                with cl2:
+                    if "LDL" in df.columns: st.markdown("**LDL**"); st.line_chart(df[["LDL"]].dropna(), color="#ef4444")
+                with cl3:
+                    if "HDL" in df.columns: st.markdown("**HDL**"); st.line_chart(df[["HDL"]].dropna(), color="#10b981")
+                with cl4:
+                    if "Triglicerídeos" in df.columns: st.markdown("**Triglicerídeos**"); st.line_chart(df[["Triglicerídeos"]].dropna(), color="#f97316")
+
+                st.markdown("#### ⚡ Eixo Hormonal (Metabolismo e Catabolismo)")
+                ch1, ch2, ch3 = st.columns(3)
+                with ch1:
+                    if "Testosterona Total" in df.columns: st.markdown("**Testosterona**"); st.line_chart(df[["Testosterona Total"]].dropna(), color="#16a34a")
+                with ch2:
+                    if "Cortisol" in df.columns: st.markdown("**Cortisol**"); st.line_chart(df[["Cortisol"]].dropna(), color="#8b5cf6")
+                with ch3:
+                    if "TSH" in df.columns: st.markdown("**TSH**"); st.line_chart(df[["TSH"]].dropna(), color="#d946ef")
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            if len(hist_paciente) >= 2:
+                if st.button("🤖 Gerar Parecer de Evolução Clínica"):
+                    with st.spinner("Analisando progressão metabólica através dos 3 Eixos..."):
+                        parecer = analisador.gerar_comparativo_evolucao(hist_paciente)
+                        st.markdown(f"<div class='caixa-evolucao'>{parecer}</div>", unsafe_allow_html=True)
+                        
+                        html_evolucao = gerar_html_evolucao(paciente_ativo, parecer)
+                        nome_arquivo_evo = f"Evolucao_{paciente_ativo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}"
+                        st.markdown(baixar_html(html_evolucao, nome_arquivo_evo), unsafe_allow_html=True)
+            
+            with st.expander("Ver histórico bruto"): st.json(hist_paciente)
+        else: st.info("O paciente ainda não possui exames salvos nesta clínica.")
+
     # ==========================================
     # ABA 2: NOVA ANÁLISE
     # ==========================================
