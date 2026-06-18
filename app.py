@@ -262,8 +262,7 @@ def gerar_html_cardapio(paciente, cardapio_md):
     <div>{html_cardapio}</div>
     </body></html>
     """
-    return html
-    
+    return html    
 def gerar_html_evolucao(paciente, parecer_md):
     html_content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', parecer_md)
     html_content = re.sub(r'### (.*)', r'<h3>\1</h3>', html_content)
