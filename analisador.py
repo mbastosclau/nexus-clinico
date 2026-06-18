@@ -74,7 +74,7 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
                 "eixo_hormonal": "Análise Endocrinológica e Metabólica: Avaliação do status dos eixos gonadal, tireoidiano, adrenal e balanço anabólico/catabólico.",
                 "eixo_inflamatorio": "Análise Cardiológica e Vascular: Avaliação fina do perfil lipídico avançado, risco aterogênico, integridade endotelial, PCR e enzimas de dano tecidual como CPK.",
                 "insight_medico": "Diretriz Clínica Médica: Hipóteses diagnósticas de suporte, sugestão de exames complementares de imagem ou funcionais, e conduta médica/farmacológica.",
-                "insight_nutricional": "Diretriz Nutricional Geral: Vias nutricionais, sugestão de macros, calorias e suplementação ergogênica ajustadas ao quadro clínico.",
+                "insight_nutricional": "Diretriz Nutricional Geral: Vias nutricionais e suplementação ergogênica ajustadas ao quadro clínico.",
                 "estrategia_nutricional": {{
                     "calorias_alvo": "ex: 2400 kcal",
                     "macros": {{
@@ -120,7 +120,7 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
                 "insight_medico": "Diretriz Clínica: Exames de imagem/rastreio recomendados e conduta terapêutica/preventiva.",
                 "insight_nutricional": "Diretriz Nutricional Geral: Vias nutricionais, sugestão de macros, calorias e suplementação ergogênica ajustadas ao quadro clínico.",
                 "estrategia_nutricional": {{
-                    "calorias_alvo": "...",
+                    "calorias_alvo": "ex: 2000 kcal",
                     "macros": {{ "proteinas": "...", "carboidratos": "...", "gorduras": "..." }},
                     "justificativa_clinica": "..."
                 }},
@@ -183,21 +183,20 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
         if not resposta.text: return json.dumps({"erro": "A IA retornou uma resposta vazia."})
         
         json_match = re.search(r'\{.*\}', resposta.text, re.DOTALL)
-        
         if json_match:
-            json_puro = json_match.group(0)
+            resposta_texto = json_match.group(0)
         else:
-            return json.dumps({
-                "erro": "O modelo não retornou um formato JSON válido.",
-                "resposta_bruta": resposta.text
-            }, ensure_ascii=False)
+            resposta_texto = resposta.text
+
+        match = re.search(r'\{.*\}', resposta_texto, re.DOTALL)
+        json_puro = match.group(0) if match else resposta_texto
         
         try:
             dados_ia = json.loads(json_puro)
         except Exception as e_json:
             return json.dumps({
                 "erro": "A IA não retornou os dados no formato esperado.",
-                "resposta_bruta": json_puro
+                "resposta_bruta": resposta_texto
             }, ensure_ascii=False)
 
         # Aplicador automático da sua biblioteca de Ranges Inteligentes
