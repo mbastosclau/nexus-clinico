@@ -65,7 +65,7 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             5. O campo 'insight_medico' deve complementar com condutas médicas puras (exames de imagem, Doppler, rastreio cardiovascular e conduta preventiva).
             6. Mantenha o Freio Metabólico rigoroso para carboidratos se houver Pré-Diabetes (HbA1c > 5.4%) ou Dislipidemia, limitando-os a 1.5g-2.0g/kg e priorizando gorduras mono/poli-insaturadas (Azeite, Abacate) e proteínas para bater o alvo calórico de treino de forma segura.
             
-            Retorne APENAS um formato JSON válido com as seguintes chaves (sem formatação markdown fora das strings):
+            Retorne APENAS um formato JSON válido com as seguintes chaves ESTRITAS:
             {{
                 "resumo_executivo": "Síntese médica e nutricional ampla do estado do paciente.",
                 "alertas_vermelhos": ["alerta crítico 1", "se não houver, envie array vazio"],
@@ -74,6 +74,7 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
                 "eixo_hormonal": "Análise Endocrinológica e Metabólica: Avaliação do status dos eixos gonadal, tireoidiano, adrenal e balanço anabólico/catabólico.",
                 "eixo_inflamatorio": "Análise Cardiológica e Vascular: Avaliação fina do perfil lipídico avançado, risco aterogênico, integridade endotelial, PCR e enzimas de dano tecidual como CPK.",
                 "insight_medico": "Diretriz Clínica Médica: Hipóteses diagnósticas de suporte, sugestão de exames complementares de imagem ou funcionais, e conduta médica/farmacológica.",
+                "insight_nutricional": "Diretriz Nutricional Geral: Vias nutricionais, sugestão de macros, calorias e suplementação ergogênica ajustadas ao quadro clínico.",
                 "estrategia_nutricional": {{
                     "calorias_alvo": "ex: 2400 kcal",
                     "macros": {{
@@ -108,7 +109,7 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             - O campo 'insight_medico' deve propor condutas de rastreio de comorbidades e intervenção preventiva.
             - Siga o freio metabólico de carboidratos (1.0g a 1.5g/kg) se houver dislipidemia ou resistência insulínica.
             
-            Retorne APENAS um formato JSON válido com as seguintes chaves:
+            Retorne APENAS um formato JSON válido com as seguintes chaves ESTRITAS:
             {{
                 "resumo_executivo": "Síntese médica geral.",
                 "alertas_vermelhos": [],
@@ -117,6 +118,7 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
                 "eixo_hormonal": "Avaliação glandular e hormonal abrangente.",
                 "eixo_inflamatorio": "Análise cardiológica do perfil lipídico e marcadores de inflamação vascular.",
                 "insight_medico": "Diretriz Clínica: Exames de imagem/rastreio recomendados e conduta terapêutica/preventiva.",
+                "insight_nutricional": "Diretriz Nutricional Geral: Vias nutricionais, sugestão de macros, calorias e suplementação ergogênica ajustadas ao quadro clínico.",
                 "estrategia_nutricional": {{
                     "calorias_alvo": "...",
                     "macros": {{ "proteinas": "...", "carboidratos": "...", "gorduras": "..." }},
@@ -176,18 +178,26 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             """
 
         resposta = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        
+        # --- BLOCO DE SEGURANÇA PARA EXTRAIR O JSON ---
         if not resposta.text: return json.dumps({"erro": "A IA retornou uma resposta vazia."})
-        resposta_texto = resposta.text
-
-        match = re.search(r'\{.*\}', resposta_texto, re.DOTALL)
-        json_puro = match.group(0) if match else resposta_texto
+        
+        json_match = re.search(r'\{.*\}', resposta.text, re.DOTALL)
+        
+        if json_match:
+            json_puro = json_match.group(0)
+        else:
+            return json.dumps({
+                "erro": "O modelo não retornou um formato JSON válido.",
+                "resposta_bruta": resposta.text
+            }, ensure_ascii=False)
         
         try:
             dados_ia = json.loads(json_puro)
         except Exception as e_json:
             return json.dumps({
                 "erro": "A IA não retornou os dados no formato esperado.",
-                "resposta_bruta": resposta_texto
+                "resposta_bruta": json_puro
             }, ensure_ascii=False)
 
         # Aplicador automático da sua biblioteca de Ranges Inteligentes
