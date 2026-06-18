@@ -656,7 +656,7 @@ else:
                 if html_calculadoras: st.markdown(html_calculadoras, unsafe_allow_html=True)
                 
                 modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
-if modulo_selecionado in modulos_avancados:
+                if modulo_selecionado in modulos_avancados:
                     st.subheader("📊 Resumo Executivo")
                     st.info(laudo_mais_recente.get('resumo_executivo', ''))
                     if laudo_mais_recente.get('alertas_vermelhos'): st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Críticos:</strong><br>" + "<br>".join([f"• {a}" for a in laudo_mais_recente.get('alertas_vermelhos')]) + "</div>", unsafe_allow_html=True)
