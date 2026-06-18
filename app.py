@@ -312,20 +312,37 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
 
     html_calculos = f"<h2>🧮 Calculadoras de Risco</h2><div style='background-color: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e2e8f0;'>{calculos_html}</div>" if calculos_html else ""
 
-    if modulo in ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia"]:
+    # Agora o Painel Completo também é considerado um módulo avançado!
+    modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
+    
+    if modulo in modulos_avancados:
         alertas = "".join([f"<li>{a}</li>" for a in dados_json.get('alertas_vermelhos', [])])
         caixa_alertas = f"<div class='alert-box'><ul>{alertas}</ul></div>" if alertas else ""
         alertas_inbody = "".join([f"<li>{a}</li>" for a in dados_json.get('alertas_composicao', [])])
         caixa_inbody = f"<div class='alert-box' style='background-color: #fffbeb; border-color: #f59e0b; color: #b45309;'><strong>⚖️ Alertas de Composição Corporal:</strong><br><ul>{alertas_inbody}</ul></div>" if alertas_inbody else ""
         
-        titulo_modulo = "DOSSIÊ DE ALTA PERFORMANCE" if modulo == "Fisiologia do Esporte e Alta Performance" else "DOSSIÊ METABÓLICO E ENDÓCRINO"
-        sub_modulo = "Avaliação Fisiológica Esportiva Avançada" if modulo == "Fisiologia do Esporte e Alta Performance" else "Avaliação Endócrina, Metabólica e Esportiva"
+        # --- INCLUSÃO DOS MACROS DIRETAMENTE NO LAUDO HTML ---
+        macros = dados_json.get('estrategia_nutricional', {})
+        html_macros = ""
+        if isinstance(macros, dict) and macros.get('macros'):
+            html_macros = f"""
+            <div class="insight-box" style="border-left-color: #f59e0b; background-color: #fffbeb;">
+                <strong>🍽️ Estratégia de Macronutrientes (Meta):</strong><br>
+                Calorias Alvo: {macros.get('calorias_alvo', '')}<br>
+                Proteínas: {macros.get('macros', {}).get('proteinas', '')}<br>
+                Carboidratos: {macros.get('macros', {}).get('carboidratos', '')}<br>
+                Gorduras: {macros.get('macros', {}).get('gorduras', '')}<br>
+                <em>Justificativa: {macros.get('justificativa_clinica', '')}</em>
+            </div>
+            """
+
+        titulo_modulo = "DOSSIÊ CLÍNICO DE ALTA PERFORMANCE" if "Performance" in modulo else "DOSSIÊ CLÍNICO E METABÓLICO"
 
         html = f"""
         <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Dossiê - {paciente}</title>
         <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .alert-box {{ background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; }} .eixo-box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 15px; }} .insight-box {{ background-color: #f0fdf4; border-left: 5px solid #22c55e; padding: 15px; margin-bottom: 15px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95em; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }} th, td {{ padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
         </head><body>
-        <div class="header"><h1>{titulo_modulo}</h1><h3>{sub_modulo}</h3></div>
+        <div class="header"><h1>{titulo_modulo}</h1><h3>Avaliação Fisiológica Integrada</h3></div>
         <p><strong>Paciente:</strong> {paciente} | <strong>Data:</strong> {data}</p>
         <h2>📊 Resumo Executivo</h2><p>{dados_json.get('resumo_executivo', '')}</p>
         {f"<h2>🚨 Alertas Críticos</h2>{caixa_alertas}" if alertas else ""}
@@ -337,10 +354,22 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
         <h2>🎯 Insights para Conduta</h2>
         <div class="insight-box"><strong>Foco Médico / Estratégia Endócrina:</strong><br>{dados_json.get('insight_medico', '')}</div>
         <div class="insight-box"><strong>Foco Nutricional / Suplementação Ergogênica:</strong><br>{dados_json.get('insight_nutricional', '')}</div>
+        {html_macros}
         {html_calculos}
         <h2>🔬 Detalhamento (Radar de Marcadores Otimizados)</h2>
         <table><tr><th>Marcador</th><th>Resultado / Status</th><th>Referência do Laboratório</th><th>Análise Fisiológica</th></tr>{linhas_tabela}</table>
         <div class="footer">Gerado por Nexus Clínico - Suporte à Decisão de Alta Performance.</div></body></html>
+        """
+        return html
+    else:
+        # Laudo básico para módulos não avançados
+        html = f"""
+        <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo Clínico</title>
+        <style>body {{ font-family: sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }} th, td {{ padding: 10px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }}</style>
+        </head><body><h1 style="text-align: center; color: #1e3a8a;">LAUDO CLÍNICO ESPECIALIZADO</h1><p><strong>Paciente:</strong> {paciente} | <strong>Data:</strong> {data} | <strong>Módulo:</strong> {modulo}</p>
+        <h3>Resumo Clínico</h3><p>{dados_json.get('resumo_clinico', '')}</p>{html_calculos}
+        <h3>Detalhamento (Marcadores)</h3><table><tr><th>Marcador</th><th>Resultado / Status</th><th>Referência Laboratorial</th><th>Análise</th></tr>{linhas_tabela}</table>
+        </body></html>
         """
         return html
     elif modulo == "Microbiologia (Cultura e Antibiograma)":
@@ -641,7 +670,8 @@ else:
                 html_calculadoras = calcular_indices(laudo_mais_recente)
                 if html_calculadoras: st.markdown(html_calculadoras, unsafe_allow_html=True)
                 
-                if modulo_selecionado in ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia"]:
+                modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
+if modulo_selecionado in modulos_avancados:
                     st.subheader("📊 Resumo Executivo")
                     st.info(laudo_mais_recente.get('resumo_executivo', ''))
                     if laudo_mais_recente.get('alertas_vermelhos'): st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Críticos:</strong><br>" + "<br>".join([f"• {a}" for a in laudo_mais_recente.get('alertas_vermelhos')]) + "</div>", unsafe_allow_html=True)
