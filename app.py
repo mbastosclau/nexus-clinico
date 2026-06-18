@@ -396,9 +396,12 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
         </body></html>
         """
         return html
-        # --- GESTÃO NO MENU LATERAL ---
+       # --- GESTÃO NO MENU LATERAL ---
 st.sidebar.title("👥 Gestão de Pacientes")
-pacientes_salvos = [f.replace('.json', '') for f in os.listdir(PASTA_BD) if f.endswith('.json')]
+
+# BLINDAGEM 1: Ocultar arquivos de cardápio da lista de pacientes
+pacientes_salvos = [f.replace('.json', '') for f in os.listdir(PASTA_BD) if f.endswith('.json') and not f.endswith('_cardapio.json')]
+
 opcao_paciente = st.sidebar.radio("Ação:", ["Selecionar Existente", "Novo Paciente"])
 
 paciente_ativo = ""
@@ -406,10 +409,10 @@ if opcao_paciente == "Novo Paciente":
     paciente_ativo = st.sidebar.text_input("Nome Completo:")
     if st.sidebar.button("Limpar Tela para Novo"): st.rerun()
 else:
-    if pacientes_salvos: 
+    if pacientes_salvos:
         paciente_ativo = st.sidebar.selectbox("Escolha o Paciente:", pacientes_salvos)
-    else: 
-        st.sidebar.warning("Nenhum paciente cadastrado para esta clínica.")
+    else:
+        st.sidebar.warning("Nenhum paciente cadastrado.")
 
 # ZONA DE PERIGO
 if paciente_ativo and opcao_paciente == "Selecionar Existente":
@@ -421,24 +424,35 @@ if paciente_ativo and opcao_paciente == "Selecionar Existente":
             with open(caminho_arquivo, 'r', encoding='utf-8') as f:
                 try: hist_temp = json.load(f)
                 except: hist_temp = []
-            if hist_temp:
+                
+            # BLINDAGEM 2: Só procurar exames se o arquivo for realmente uma lista de histórico
+            if isinstance(hist_temp, list) and len(hist_temp) > 0:
                 st.markdown("**Apagar um Exame Específico:**")
-                datas_exames = [h.get('data') for h in hist_temp if h.get('data')]
+                datas_exames = [h.get('data') for h in hist_temp if isinstance(h, dict) and h.get('data')]
+                
                 if datas_exames:
                     data_apagar = st.selectbox("Selecione a data:", datas_exames)
                     if st.button("🗑️ Excluir Exame", key="btn_excluir_exame"):
-                        hist_novo = [h for h in hist_temp if h.get('data') != data_apagar]
-                        with open(caminho_arquivo, 'w', encoding='utf-8') as f: json.dump(hist_novo, f, ensure_ascii=False, indent=4)
+                        hist_novo = [h for h in hist_temp if isinstance(h, dict) and h.get('data') != data_apagar]
+                        with open(caminho_arquivo, 'w', encoding='utf-8') as f: 
+                            json.dump(hist_novo, f, ensure_ascii=False, indent=4)
                         st.sidebar.success(f"Exame de {data_apagar} removido do histórico!")
                         st.rerun()
+        
         st.markdown("---")
         st.markdown("**Apagar Paciente:**")
         st.caption("Esta ação apagará todo o histórico e laudos deste paciente. Não há como reverter.")
         if st.button("🚨 Excluir Paciente", key="btn_excluir_paciente"):
+            # Apaga o exame do paciente
             if os.path.exists(caminho_arquivo): os.remove(caminho_arquivo)
+            # Apaga o cardápio do paciente junto
+            caminho_cardapio_del = os.path.join(PASTA_BD, f"{paciente_ativo}_cardapio.json")
+            if os.path.exists(caminho_cardapio_del): os.remove(caminho_cardapio_del)
+            
             st.sidebar.success(f"Paciente {paciente_ativo} excluído!")
             st.rerun()
 
+st.title("🧬 Nexus Clínico | Copiloto Médico")
 # --- CONSTRUÇÃO DAS ABAS PRINCIPAIS ---
 if not paciente_ativo:
     st.info("👈 Por favor, crie um Novo Paciente ou selecione um existente no menu lateral para iniciar.")
