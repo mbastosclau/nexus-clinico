@@ -653,10 +653,12 @@ else:
                     texto_inbody = extrair_texto_pdf(uploaded_inbody)
                     
                 texto_completo = texto_sangue + ("\n\n--- DADOS DE BIOIMPEDÂNCIA ---\n" + texto_inbody if texto_inbody else "")
-                # --- NOVO: CONTEXTO COM CICLO MENSTRUAL ---
+                # --- NOVO: CONTEXTO COM CICLO MENSTRUAL E DUM ---
                 contexto_completo = f"Idade: {idade_paciente} anos\nSexo: {sexo_paciente}\n"
                 if ciclo_menstrual:
                     contexto_completo += f"Fase do Ciclo Menstrual: {ciclo_menstrual}\n"
+                if dum:
+                    contexto_completo += f"Data da Última Menstruação (DUM): {dum}\n"
                 contexto_completo += f"Peso Atual: {peso_paciente} kg\nObjetivo Principal: {objetivo}\nNível de Treino: {atividade_fisica}\nInformações Adicionais: {contexto}"
                 
                 try:
