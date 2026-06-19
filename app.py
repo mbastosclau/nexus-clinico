@@ -587,10 +587,16 @@ else:
                 "Imunologia - Toxoplasmose",
                 "Imunologia - COVID-19"
             ])
-            # --- NOVO: CAMPO DO CICLO MENSTRUAL ---
+            # --- NOVO: CAMPO DO CICLO MENSTRUAL E DUM ---
         ciclo_menstrual = ""
+        dum = ""
         if sexo_paciente == "Feminino":
-            ciclo_menstrual = st.selectbox("Fase do Ciclo Menstrual:", ["Não Aplicável / Menopausa / Anticoncepcional", "Fase Folicular", "Fase Ovulatória", "Fase Lútea"], key=f"ciclo_{paciente_ativo}")
+            col_fem1, col_fem2 = st.columns(2)
+            with col_fem1:
+                ciclo_menstrual = st.selectbox("Fase do Ciclo Menstrual:", ["Não Aplicável / Menopausa / Anticoncepcional", "Fase Folicular", "Fase Ovulatória", "Fase Lútea"], key=f"ciclo_{paciente_ativo}")
+            with col_fem2:
+                if ciclo_menstrual != "Não Aplicável / Menopausa / Anticoncepcional":
+                    dum = st.text_input("Data da Última Menstruação (DUM):", placeholder="Ex: 12/05/2026 ou 'Não lembra'", key=f"dum_{paciente_ativo}")
         # --------------------------------------
         
         if st.button("💾 Salvar Perfil (Sem Exame)", key=f"btn_salvar_bio_{paciente_ativo}"):
