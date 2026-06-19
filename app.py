@@ -587,7 +587,12 @@ else:
                 "Imunologia - Toxoplasmose",
                 "Imunologia - COVID-19"
             ])
-            
+            # --- NOVO: CAMPO DO CICLO MENSTRUAL ---
+        ciclo_menstrual = ""
+        if sexo_paciente == "Feminino":
+            ciclo_menstrual = st.selectbox("Fase do Ciclo Menstrual:", ["Não Aplicável / Menopausa / Anticoncepcional", "Fase Folicular", "Fase Ovulatória", "Fase Lútea"], key=f"ciclo_{paciente_ativo}")
+        # --------------------------------------
+        
         if st.button("💾 Salvar Perfil (Sem Exame)", key=f"btn_salvar_bio_{paciente_ativo}"):
             bio_nova = {"idade": idade_paciente, "sexo": sexo_paciente, "peso": peso_paciente, "objetivo": objetivo, "atividade": atividade_fisica}
             sucesso = salvar_biometria_perfil(paciente_ativo, bio_nova)
@@ -642,7 +647,11 @@ else:
                     texto_inbody = extrair_texto_pdf(uploaded_inbody)
                     
                 texto_completo = texto_sangue + ("\n\n--- DADOS DE BIOIMPEDÂNCIA ---\n" + texto_inbody if texto_inbody else "")
-                contexto_completo = f"Idade: {idade_paciente} anos\nSexo: {sexo_paciente}\nPeso Atual: {peso_paciente} kg\nObjetivo Principal: {objetivo}\nNível de Treino: {atividade_fisica}\nInformações Adicionais: {contexto}"
+                # --- NOVO: CONTEXTO COM CICLO MENSTRUAL ---
+                contexto_completo = f"Idade: {idade_paciente} anos\nSexo: {sexo_paciente}\n"
+                if ciclo_menstrual:
+                    contexto_completo += f"Fase do Ciclo Menstrual: {ciclo_menstrual}\n"
+                contexto_completo += f"Peso Atual: {peso_paciente} kg\nObjetivo Principal: {objetivo}\nNível de Treino: {atividade_fisica}\nInformações Adicionais: {contexto}"
                 
                 try:
                     with open('diretrizes_essenciais.txt', 'r', encoding='utf-8') as f: diretrizes = f.read()
