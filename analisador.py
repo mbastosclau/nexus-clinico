@@ -65,6 +65,13 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             5. O campo 'insight_medico' deve complementar com condutas médicas puras (exames de imagem, Doppler, rastreio cardiovascular e conduta preventiva).
             6. Mantenha o Freio Metabólico rigoroso para carboidratos se houver Pré-Diabetes (HbA1c > 5.4%) ou Dislipidemia, limitando-os a 1.5g-2.0g/kg e priorizando gorduras mono/poli-insaturadas (Azeite, Abacate) e proteínas para bater o alvo calórico de treino de forma segura.
             
+            🚨 REGRA DE ECONOMIA E FOCO CLÍNICO (PARA O ARRAY 'achados'):
+            Você é ESTRITAMENTE PROIBIDA de listar todos os exames do paciente. Você deve listar APENAS os marcadores que se enquadrem em uma destas 3 condições:
+            1. Estão clinicamente alterados (fora da referência).
+            2. Estão dentro da referência, mas em níveis sub-ótimos (Alerta).
+            3. São absolutamente cruciais para justificar a sua conduta nos Eixos Metabólicos.
+            Ignore sumariamente (NÃO inclua na tabela) exames de rotina que estejam perfeitamente normais e não agreguem valor à conduta.
+            
             Retorne APENAS um formato JSON válido com as seguintes chaves ESTRITAS:
             {{
                 "resumo_executivo": "Síntese médica e nutricional ampla do estado do paciente.",
@@ -108,6 +115,13 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             - No 'eixo_inflamatorio', detalhe a avaliação lipídica cardiológica e marcadores inflamatórios.
             - O campo 'insight_medico' deve propor condutas de rastreio de comorbidades e intervenção preventiva.
             - Siga o freio metabólico de carboidratos (1.0g a 1.5g/kg) se houver dislipidemia ou resistência insulínica.
+            
+            🚨 REGRA DE ECONOMIA E FOCO CLÍNICO (PARA O ARRAY 'achados'):
+            Você é ESTRITAMENTE PROIBIDA de listar todos os exames do paciente. Você deve listar APENAS os marcadores que se enquadrem em uma destas 3 condições:
+            1. Estão clinicamente alterados (fora da referência).
+            2. Estão dentro da referência, mas em níveis sub-ótimos (Alerta).
+            3. São absolutamente cruciais para justificar a sua conduta nos Eixos Metabólicos.
+            Ignore sumariamente (NÃO inclua na tabela) exames de rotina que estejam perfeitamente normais e não agreguem valor à conduta.
             
             Retorne APENAS um formato JSON válido com as seguintes chaves ESTRITAS:
             {{
@@ -166,6 +180,9 @@ def gerar_laudo_clinico(dados_extraidos, diretrizes="", contexto_clinico="", mod
             Módulo selecionado: {modulo}
             
             Foque na interpretação médica diagnóstica ampla, não apenas nutricional.
+            
+            🚨 REGRA DE ECONOMIA E FOCO CLÍNICO:
+            No array de 'achados', liste APENAS marcadores alterados, sub-ótimos ou cruciais para o diagnóstico. NÃO liste exames normais de rotina que não agreguem valor.
             
             Retorne APENAS um formato JSON válido com as seguintes chaves:
             {{

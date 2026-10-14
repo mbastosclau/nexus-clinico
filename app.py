@@ -31,6 +31,8 @@ def init_supabase() -> Client:
     key = os.environ.get("SUPABASE_KEY")
     if not url or not key:
         return None
+    url = url.strip().strip('"').strip("'")
+    key = key.strip().strip('"').strip("'")
     return create_client(url, key)
 
 supabase = init_supabase()
@@ -57,7 +59,6 @@ if not st.session_state['usuario_logado']:
                     st.error("Erro Crítico: Falha na conexão. Verifique o arquivo .env.")
                 else:
                     try:
-                        # Método síncrono padrão. A resposta contém a sessão e o usuário.
                         response = supabase.auth.sign_in_with_password({"email": email_login, "password": senha_login})
                         if response.user:
                             st.session_state['usuario_logado'] = response.user
@@ -65,7 +66,6 @@ if not st.session_state['usuario_logado']:
                         else:
                             st.error("Falha ao validar os dados do usuário.")
                     except Exception as e:
-                        # Tratamento simplificado de erros
                         st.error(f"Erro: {str(e)}")
 
         with tab_registro:
@@ -77,13 +77,12 @@ if not st.session_state['usuario_logado']:
                     st.error("Erro de conexão com o banco.")
                 else:
                     try:
-                        # Método síncrono padrão para registro.
                         response = supabase.auth.sign_up({"email": email_novo, "password": senha_nova})
                         if response.user:
                             try:
                                 supabase.table("perfis_profissionais").insert({"id": response.user.id, "nome_completo": nome_completo}).execute()
                             except Exception as db_err:
-                                pass # Ignora erro de inserção no banco se a tabela não existir, mas o auth foi criado
+                                pass
                             st.success("✅ Conta criada com sucesso! Acesse a aba 'Entrar no Sistema'.")
                     except Exception as e:
                         st.error(f"Erro ao registrar: {str(e)}")
@@ -91,10 +90,6 @@ if not st.session_state['usuario_logado']:
         st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
-# ==========================================
-# CÓDIGO MESTRE: EXECUTA APENAS SE LOGADO
-# ==========================================
-# (Mantenha o seu código original a partir daqui, começando pela definição da PASTA_BD)
 
 # ==========================================
 # CÓDIGO MESTRE: EXECUTA APENAS SE LOGADO
@@ -108,7 +103,6 @@ os.makedirs(PASTA_BD, exist_ok=True)
 # --- CABEÇALHO SUPERIOR DE USUÁRIO ---
 col_head1, col_head2 = st.columns([4, 1])
 with col_head1:
-    # Acessa o email com tratamento para atributos do objeto user
     email_logado = getattr(st.session_state['usuario_logado'], 'email', 'Médico Autenticado')
     st.markdown(f"👨‍⚕️ **Profissional Logado:** <span style='color:#38bdf8;'>{email_logado}</span>", unsafe_allow_html=True)
 with col_head2:
@@ -263,6 +257,7 @@ def gerar_html_cardapio(paciente, cardapio_md):
     </body></html>
     """
     return html    
+
 def gerar_html_evolucao(paciente, parecer_md):
     html_content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', parecer_md)
     html_content = re.sub(r'### (.*)', r'<h3>\1</h3>', html_content)
@@ -353,7 +348,7 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
         <div class="insight-box"><strong>Foco Nutricional / Suplementação Ergogênica:</strong><br>{dados_json.get('insight_nutricional', '')}</div>
         {html_macros}
         {html_calculos}
-        <h2>🔬 Detalhamento (Radar de Marcadores Otimizados)</h2>
+        <h2>🔬 Marcadores Clínicos em Destaque (Alterações e Alvos)</h2>
         <table><tr><th>Marcador</th><th>Resultado / Status</th><th>Referência do Laboratório</th><th>Análise Fisiológica</th></tr>{linhas_tabela}</table>
         <div class="footer">Gerado por Nexus Clínico - Suporte à Decisão de Alta Performance.</div></body></html>
         """
@@ -396,7 +391,8 @@ def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
         </body></html>
         """
         return html
-       # --- GESTÃO NO MENU LATERAL ---
+
+# --- GESTÃO NO MENU LATERAL ---
 st.sidebar.title("👥 Gestão de Pacientes")
 
 # BLINDAGEM 1: Ocultar arquivos de cardápio da lista de pacientes
@@ -453,6 +449,7 @@ if paciente_ativo and opcao_paciente == "Selecionar Existente":
             st.rerun()
 
 st.title("🧬 Nexus Clínico | Copiloto Médico")
+
 # --- CONSTRUÇÃO DAS ABAS PRINCIPAIS ---
 if not paciente_ativo:
     st.info("👈 Por favor, crie um Novo Paciente ou selecione um existente no menu lateral para iniciar.")
@@ -463,9 +460,6 @@ else:
     # ==========================================
     # ABA 1: DASHBOARD
     # ==========================================
-    # ==========================================
-    # ABA 1: DASHBOARD
-    # ==========================================
     with aba_dashboard:
         caminho_arquivo = os.path.join(PASTA_BD, f"{paciente_ativo}.json")
         if os.path.exists(caminho_arquivo):
@@ -473,72 +467,74 @@ else:
                 try: hist_paciente = json.load(f)
                 except: hist_paciente = []
             
-            # --- NOVO BLOCO: PERSISTÊNCIA E EXIBIÇÃO DO ÚLTIMO LAUDO ---
             if hist_paciente:
                 ultimo_laudo = hist_paciente[-1]['laudo']
                 data_laudo = hist_paciente[-1]['data']
-                st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-                st.subheader(f"📄 Último Laudo Gerado: {data_laudo}")
                 
-                st.markdown("#### 🧬 Análise Metabólica Cruzada")
-                colA, colB, colC = st.columns(3)
-                with colA: st.info(f"**Eixo Glicêmico:**\n\n{ultimo_laudo.get('eixo_glicemico', '...')}")
-                with colB: st.info(f"**Eixo Hormonal:**\n\n{ultimo_laudo.get('eixo_hormonal', '...')}")
-                with colC: st.info(f"**Eixo Inflamatório:**\n\n{ultimo_laudo.get('eixo_inflamatorio', '...')}")
-                
-                st.markdown("#### 🎯 Insights de Conduta")
-                st.success(f"**Médica:** {ultimo_laudo.get('insight_medico', '...')}")
-                st.success(f"**Nutricional:** {ultimo_laudo.get('insight_nutricional', '...')}")
-                st.markdown("</div>", unsafe_allow_html=True)
-            # --- FIM DO NOVO BLOCO ---
+                with st.container(border=True):
+                    st.subheader(f"📄 Último Laudo Gerado: {data_laudo}")
+                    
+                    st.markdown("#### 🧬 Análise Metabólica Cruzada")
+                    colA, colB, colC = st.columns(3)
+                    with colA: st.info(f"**Eixo Glicêmico:**\n\n{ultimo_laudo.get('eixo_glicemico', '...')}")
+                    with colB: st.info(f"**Eixo Hormonal:**\n\n{ultimo_laudo.get('eixo_hormonal', '...')}")
+                    with colC: st.info(f"**Eixo Inflamatório:**\n\n{ultimo_laudo.get('eixo_inflamatorio', '...')}")
+                    
+                    st.markdown("#### 🎯 Insights de Conduta")
+                    st.success(f"**Médica:** {ultimo_laudo.get('insight_medico', '...')}")
+                    st.success(f"**Nutricional:** {ultimo_laudo.get('insight_nutricional', '...')}")
 
-            st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-            st.subheader("📈 Evolução de Biomarcadores")
-            dados_evolucao = extrair_valores_historico(hist_paciente)
-            if dados_evolucao and len(dados_evolucao) > 0:
-                df = pd.DataFrame(dados_evolucao)
-                try: df["Data"] = pd.to_datetime(df["Data"]); df = df.set_index("Data").sort_index()
-                except: df = df.set_index("Data")
-                
-                st.markdown("#### 🩸 Eixo Glicêmico e Resistência à Insulina")
-                cg1, cg2, cg3 = st.columns(3)
-                with cg1:
-                    if "Glicemia" in df.columns: st.markdown("**Glicemia de Jejum**"); st.line_chart(df[["Glicemia"]].dropna(), color="#3b82f6")
-                with cg2:
-                    if "HbA1c" in df.columns: st.markdown("**HbA1c (%)**"); st.line_chart(df[["HbA1c"]].dropna(), color="#f59e0b")
-                with cg3:
-                    if "HOMA-IR" in df.columns: st.markdown("**HOMA-IR**"); st.line_chart(df[["HOMA-IR"]].dropna(), color="#dc2626")
+            with st.container(border=True):
+                st.subheader("📈 Evolução de Biomarcadores")
+                dados_evolucao = extrair_valores_historico(hist_paciente)
+                if dados_evolucao and len(dados_evolucao) > 0:
+                    df = pd.DataFrame(dados_evolucao)
+                    try: df["Data"] = pd.to_datetime(df["Data"]); df = df.set_index("Data").sort_index()
+                    except: df = df.set_index("Data")
+                    
+                    st.markdown("#### 🩸 Eixo Glicêmico e Resistência à Insulina")
+                    cg1, cg2, cg3 = st.columns(3)
+                    with cg1:
+                        if "Glicemia" in df.columns: st.markdown("**Glicemia de Jejum**"); st.line_chart(df[["Glicemia"]].dropna(), color="#3b82f6")
+                    with cg2:
+                        if "HbA1c" in df.columns: st.markdown("**HbA1c (%)**"); st.line_chart(df[["HbA1c"]].dropna(), color="#f59e0b")
+                    with cg3:
+                        if "HOMA-IR" in df.columns: st.markdown("**HOMA-IR**"); st.line_chart(df[["HOMA-IR"]].dropna(), color="#dc2626")
 
-                st.markdown("#### 🫀 Perfil Lipídico e Risco Cardiovascular")
-                cl1, cl2, cl3, cl4 = st.columns(4)
-                with cl1:
-                    if "Colesterol Total" in df.columns: st.markdown("**Col. Total**"); st.line_chart(df[["Colesterol Total"]].dropna(), color="#64748b")
-                with cl2:
-                    if "LDL" in df.columns: st.markdown("**LDL**"); st.line_chart(df[["LDL"]].dropna(), color="#ef4444")
-                with cl3:
-                    if "HDL" in df.columns: st.markdown("**HDL**"); st.line_chart(df[["HDL"]].dropna(), color="#10b981")
-                with cl4:
-                    if "Triglicerídeos" in df.columns: st.markdown("**Triglicerídeos**"); st.line_chart(df[["Triglicerídeos"]].dropna(), color="#f97316")
+                    st.markdown("#### 🫀 Perfil Lipídico e Risco Cardiovascular")
+                    cl1, cl2, cl3, cl4 = st.columns(4)
+                    with cl1:
+                        if "Colesterol Total" in df.columns: st.markdown("**Col. Total**"); st.line_chart(df[["Colesterol Total"]].dropna(), color="#64748b")
+                    with cl2:
+                        if "LDL" in df.columns: st.markdown("**LDL**"); st.line_chart(df[["LDL"]].dropna(), color="#ef4444")
+                    with cl3:
+                        if "HDL" in df.columns: st.markdown("**HDL**"); st.line_chart(df[["HDL"]].dropna(), color="#10b981")
+                    with cl4:
+                        if "Triglicerídeos" in df.columns: st.markdown("**Triglicerídeos**"); st.line_chart(df[["Triglicerídeos"]].dropna(), color="#f97316")
 
-                st.markdown("#### ⚡ Eixo Hormonal (Metabolismo e Catabolismo)")
-                ch1, ch2, ch3 = st.columns(3)
-                with ch1:
-                    if "Testosterona Total" in df.columns: st.markdown("**Testosterona**"); st.line_chart(df[["Testosterona Total"]].dropna(), color="#16a34a")
-                with ch2:
-                    if "Cortisol" in df.columns: st.markdown("**Cortisol**"); st.line_chart(df[["Cortisol"]].dropna(), color="#8b5cf6")
-                with ch3:
-                    if "TSH" in df.columns: st.markdown("**TSH**"); st.line_chart(df[["TSH"]].dropna(), color="#d946ef")
-            st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown("#### ⚡ Eixo Hormonal (Metabolismo e Catabolismo)")
+                    ch1, ch2, ch3 = st.columns(3)
+                    with ch1:
+                        if "Testosterona Total" in df.columns: st.markdown("**Testosterona**"); st.line_chart(df[["Testosterona Total"]].dropna(), color="#16a34a")
+                    with ch2:
+                        if "Cortisol" in df.columns: st.markdown("**Cortisol**"); st.line_chart(df[["Cortisol"]].dropna(), color="#8b5cf6")
+                    with ch3:
+                        if "TSH" in df.columns: st.markdown("**TSH**"); st.line_chart(df[["TSH"]].dropna(), color="#d946ef")
             
             if len(hist_paciente) >= 2:
                 if st.button("🤖 Gerar Parecer de Evolução Clínica"):
                     with st.spinner("Analisando progressão metabólica através dos 3 Eixos..."):
                         parecer = analisador.gerar_comparativo_evolucao(hist_paciente)
-                        st.markdown(f"<div class='caixa-evolucao'>{parecer}</div>", unsafe_allow_html=True)
-                        
-                        html_evolucao = gerar_html_evolucao(paciente_ativo, parecer)
-                        nome_arquivo_evo = f"Evolucao_{paciente_ativo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}"
-                        st.markdown(baixar_html(html_evolucao, nome_arquivo_evo), unsafe_allow_html=True)
+                        st.session_state['evolucao_gerada'] = {'paciente': paciente_ativo, 'parecer': parecer}
+                
+                if 'evolucao_gerada' in st.session_state and st.session_state['evolucao_gerada']['paciente'] == paciente_ativo:
+                    parecer = st.session_state['evolucao_gerada']['parecer']
+                    with st.container(border=True):
+                        st.markdown(parecer)
+                    
+                    html_evolucao = gerar_html_evolucao(paciente_ativo, parecer)
+                    nome_arquivo_evo = f"Evolucao_{paciente_ativo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}"
+                    st.markdown(baixar_html(html_evolucao, nome_arquivo_evo), unsafe_allow_html=True)
             
             with st.expander("Ver histórico bruto"): st.json(hist_paciente)
         else: st.info("O paciente ainda não possui exames salvos nesta clínica.")
@@ -565,50 +561,38 @@ else:
         lista_ativ = ["Sedentário", "Leve (1-2x sem)", "Moderado (Musculação 3-4x)", "Intenso (Musculação 5-6x)", "Atleta de Elite"]
         idx_ativ = lista_ativ.index(bio.get('atividade', lista_ativ[2])) if bio.get('atividade', lista_ativ[2]) in lista_ativ else 2
 
-        st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-        col_b1, col_b2, col_b3, col_b4 = st.columns(4)
-        
-        with col_b1: idade_paciente = st.number_input("Idade:", min_value=0, max_value=120, value=int(bio.get('idade', 52)), step=1, key=f"id_{paciente_ativo}")
-        with col_b2: sexo_paciente = st.selectbox("Sexo:", lista_sexo, index=idx_sexo, key=f"sx_{paciente_ativo}")
-        with col_b3: peso_paciente = st.number_input("Peso Atual (kg):", min_value=30.0, max_value=250.0, value=float(bio.get('peso', 87.0)), step=0.1, key=f"ps_{paciente_ativo}")
-        with col_b4: objetivo = st.selectbox("Objetivo Clínico/Esportivo:", lista_obj, index=idx_obj, key=f"ob_{paciente_ativo}")
+        with st.container(border=True):
+            col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+            
+            with col_b1: idade_paciente = st.number_input("Idade:", min_value=0, max_value=120, value=int(bio.get('idade', 52)), step=1, key=f"id_{paciente_ativo}")
+            with col_b2: sexo_paciente = st.selectbox("Sexo:", lista_sexo, index=idx_sexo, key=f"sx_{paciente_ativo}")
+            with col_b3: peso_paciente = st.number_input("Peso Atual (kg):", min_value=30.0, max_value=250.0, value=float(bio.get('peso', 87.0)), step=0.1, key=f"ps_{paciente_ativo}")
+            with col_b4: objetivo = st.selectbox("Objetivo Clínico/Esportivo:", lista_obj, index=idx_obj, key=f"ob_{paciente_ativo}")
 
-        col_t1, col_t2 = st.columns(2)
-        with col_t1: atividade_fisica = st.selectbox("Treino/Atividade:", lista_ativ, index=idx_ativ, key=f"at_{paciente_ativo}")
-        with col_t2: modulo_selecionado = st.selectbox("Módulo Clínico de Análise:", [
-                "Fisiologia do Esporte e Alta Performance",
-                "Performance, Emagrecimento e Endocrinologia",
-                "Microbiologia (Cultura e Antibiograma)",
-                "Painel Completo (Bioquímica + Hematologia)",
-                "Imunologia (Sorologias Básicas)",
-                "Imunologia - Autoimunidade",
-                "Imunologia - Alergias (IgE Específicas)",
-                "Imunologia - Marcadores Tumorais",
-                "Imunologia - Toxoplasmose",
-                "Imunologia - COVID-19"
-            ])
-            # --- NOVO: CAMPO DO CICLO MENSTRUAL E DUM ---
-        ciclo_menstrual = ""
-        dum = ""
-        if sexo_paciente == "Feminino":
-            col_fem1, col_fem2 = st.columns(2)
-            with col_fem1:
-                ciclo_menstrual = st.selectbox("Fase do Ciclo Menstrual:", ["Não Aplicável / Menopausa / Anticoncepcional", "Fase Folicular", "Fase Ovulatória", "Fase Lútea"], key=f"ciclo_{paciente_ativo}")
-            with col_fem2:
-                if ciclo_menstrual != "Não Aplicável / Menopausa / Anticoncepcional":
-                    dum = st.text_input("Data da Última Menstruação (DUM):", placeholder="Ex: 12/05/2026 ou 'Não lembra'", key=f"dum_{paciente_ativo}")
-        # --------------------------------------
-        
-        if st.button("💾 Salvar Perfil (Sem Exame)", key=f"btn_salvar_bio_{paciente_ativo}"):
-            bio_nova = {"idade": idade_paciente, "sexo": sexo_paciente, "peso": peso_paciente, "objetivo": objetivo, "atividade": atividade_fisica}
-            sucesso = salvar_biometria_perfil(paciente_ativo, bio_nova)
-            if sucesso:
-                st.success("✅ Perfil biométrico atualizado com sucesso!")
-            else:
-                st.warning("⚠️ O paciente precisa ter pelo menos um exame salvo para gravar a biometria pela primeira vez.")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1: atividade_fisica = st.selectbox("Treino/Atividade:", lista_ativ, index=idx_ativ, key=f"at_{paciente_ativo}")
+            with col_t2: modulo_selecionado = st.selectbox("Módulo Clínico de Análise:", [
+                    "Fisiologia do Esporte e Alta Performance",
+                    "Performance, Emagrecimento e Endocrinologia",
+                    "Microbiologia (Cultura e Antibiograma)",
+                    "Painel Completo (Bioquímica + Hematologia)",
+                    "Imunologia (Sorologias Básicas)",
+                    "Imunologia - Autoimunidade",
+                    "Imunologia - Alergias (IgE Específicas)",
+                    "Imunologia - Marcadores Tumorais",
+                    "Imunologia - Toxoplasmose",
+                    "Imunologia - COVID-19"
+                ])
+                
+            if st.button("💾 Salvar Perfil (Sem Exame)", key=f"btn_salvar_bio_{paciente_ativo}"):
+                bio_nova = {"idade": idade_paciente, "sexo": sexo_paciente, "peso": peso_paciente, "objetivo": objetivo, "atividade": atividade_fisica}
+                sucesso = salvar_biometria_perfil(paciente_ativo, bio_nova)
+                if sucesso:
+                    st.success("✅ Perfil biométrico atualizado com sucesso!")
+                else:
+                    st.warning("⚠️ O paciente precisa ter pelo menos um exame salvo para gravar a biometria pela primeira vez.")
 
-        contexto = st.text_area("Variáveis de Contexto:", placeholder="Ex: Uso de medicamentos, sintomas, rotina alimentar...")
-        st.markdown("</div>", unsafe_allow_html=True)
+            contexto = st.text_area("Variáveis de Contexto:", placeholder="Ex: Uso de medicamentos, sintomas, rotina alimentar...")
         
         st.markdown("### 📄 Importação de Exames (Único ou em Lote)")
         
@@ -616,13 +600,12 @@ else:
         
         dict_datas = {}
         if uploaded_sangues:
-            st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-            st.markdown("#### Defina as datas para os exames importados:")
-            for idx, arquivo in enumerate(uploaded_sangues):
-                col_d1, col_d2 = st.columns([3, 1])
-                with col_d1: st.write(f"📄 {arquivo.name}")
-                with col_d2: dict_datas[arquivo.name] = st.date_input("Data do Exame:", key=f"data_{arquivo.name}_{idx}_{paciente_ativo}")
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown("#### Defina as datas para os exames importados:")
+                for idx, arquivo in enumerate(uploaded_sangues):
+                    col_d1, col_d2 = st.columns([3, 1])
+                    with col_d1: st.write(f"📄 {arquivo.name}")
+                    with col_d2: dict_datas[arquivo.name] = st.date_input("Data do Exame:", key=f"data_{arquivo.name}_{idx}_{paciente_ativo}")
 
         uploaded_inbody = st.file_uploader("⚖️ InBody ou DEXA (Opcional - Relativo ao exame mais recente)", type="pdf")
 
@@ -653,13 +636,7 @@ else:
                     texto_inbody = extrair_texto_pdf(uploaded_inbody)
                     
                 texto_completo = texto_sangue + ("\n\n--- DADOS DE BIOIMPEDÂNCIA ---\n" + texto_inbody if texto_inbody else "")
-                # --- NOVO: CONTEXTO COM CICLO MENSTRUAL E DUM ---
-                contexto_completo = f"Idade: {idade_paciente} anos\nSexo: {sexo_paciente}\n"
-                if ciclo_menstrual:
-                    contexto_completo += f"Fase do Ciclo Menstrual: {ciclo_menstrual}\n"
-                if dum:
-                    contexto_completo += f"Data da Última Menstruação (DUM): {dum}\n"
-                contexto_completo += f"Peso Atual: {peso_paciente} kg\nObjetivo Principal: {objetivo}\nNível de Treino: {atividade_fisica}\nInformações Adicionais: {contexto}"
+                contexto_completo = f"Idade: {idade_paciente} anos\nSexo: {sexo_paciente}\nPeso Atual: {peso_paciente} kg\nObjetivo Principal: {objetivo}\nNível de Treino: {atividade_fisica}\nInformações Adicionais: {contexto}"
                 
                 try:
                     with open('diretrizes_essenciais.txt', 'r', encoding='utf-8') as f: diretrizes = f.read()
@@ -683,56 +660,70 @@ else:
             my_bar.progress(100, text="Processamento concluído!")
             
             if laudo_mais_recente:
-                html_calculadoras = calcular_indices(laudo_mais_recente)
-                if html_calculadoras: st.markdown(html_calculadoras, unsafe_allow_html=True)
+                st.session_state['resultado_analise'] = {
+                    'paciente': paciente_ativo,
+                    'laudo': laudo_mais_recente,
+                    'data': data_mais_recente,
+                    'modulo': modulo_selecionado,
+                    'html_calc': calcular_indices(laudo_mais_recente)
+                }
+
+        if 'resultado_analise' in st.session_state and st.session_state['resultado_analise']['paciente'] == paciente_ativo:
+            res = st.session_state['resultado_analise']
+            laudo_display = res['laudo']
+            data_display = res['data']
+            modulo_display = res['modulo']
+            html_calc = res['html_calc']
+            
+            if html_calc: st.markdown(html_calc, unsafe_allow_html=True)
+            
+            modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
+            if modulo_display in modulos_avancados:
+                st.subheader("📊 Resumo Executivo")
+                st.info(laudo_display.get('resumo_executivo', ''))
+                if laudo_display.get('alertas_vermelhos'): st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Críticos:</strong><br>" + "<br>".join([f"• {a}" for a in laudo_display.get('alertas_vermelhos')]) + "</div>", unsafe_allow_html=True)
+                if laudo_display.get('alertas_composicao'): st.markdown("<div class='alerta-amarelo'><strong>⚖️ Alertas de Composição Corporal (InBody/DEXA):</strong><br>" + "<br>".join([f"• {a}" for a in laudo_display.get('alertas_composicao')]) + "</div>", unsafe_allow_html=True)
                 
-                modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
-                if modulo_selecionado in modulos_avancados:
-                    st.subheader("📊 Resumo Executivo")
-                    st.info(laudo_mais_recente.get('resumo_executivo', ''))
-                    if laudo_mais_recente.get('alertas_vermelhos'): st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Críticos:</strong><br>" + "<br>".join([f"• {a}" for a in laudo_mais_recente.get('alertas_vermelhos')]) + "</div>", unsafe_allow_html=True)
-                    if laudo_mais_recente.get('alertas_composicao'): st.markdown("<div class='alerta-amarelo'><strong>⚖️ Alertas de Composição Corporal (InBody/DEXA):</strong><br>" + "<br>".join([f"• {a}" for a in laudo_mais_recente.get('alertas_composicao')]) + "</div>", unsafe_allow_html=True)
+                st.subheader("🧬 Análise Metabólica Cruzada")
+                cc1, cc2, cc3 = st.columns(3)
+                with cc1: st.markdown("**Eixo Glicêmico:**"); st.write(laudo_display.get('eixo_glicemico', ''))
+                with cc2: st.markdown("**Eixo Hormonal:**"); st.write(laudo_display.get('eixo_hormonal', ''))
+                with cc3: st.markdown("**Eixo Inflamatório:**"); st.write(laudo_display.get('eixo_inflamatorio', ''))
                     
-                    st.subheader("🧬 Análise Metabólica Cruzada")
-                    cc1, cc2, cc3 = st.columns(3)
-                    with cc1: st.markdown("**Eixo Glicêmico:**"); st.write(laudo_mais_recente.get('eixo_glicemico', ''))
-                    with cc2: st.markdown("**Eixo Hormonal:**"); st.write(laudo_mais_recente.get('eixo_hormonal', ''))
-                    with cc3: st.markdown("**Eixo Inflamatório:**"); st.write(laudo_mais_recente.get('eixo_inflamatorio', ''))
-                        
-                    st.subheader("🎯 Insights para Conduta")
-                    st.success(f"**Estratégia Clínica:**\n{laudo_mais_recente.get('insight_medico', '')}")
-                    
-                    macros = laudo_mais_recente.get('estrategia_nutricional', {})
-                    if macros:
-                        st.info(f"**🔥 Alvo Calórico e Macros:**\nCalorias: {macros.get('calorias_alvo', '')} | Proteínas: {macros.get('macros', {}).get('proteinas', '')} | Carboidratos: {macros.get('macros', {}).get('carboidratos', '')} | Gorduras: {macros.get('macros', {}).get('gorduras', '')}")
+                st.subheader("🎯 Insights para Conduta")
+                st.success(f"**Estratégia Clínica:**\n{laudo_display.get('insight_medico', '')}")
                 
-                elif modulo_selecionado == "Microbiologia (Cultura e Antibiograma)":
-                    st.subheader("🦠 Análise Microbiológica e Infecciosa")
-                    st.info(laudo_mais_recente.get('resumo_clinico', ''))
-                    
-                    bacterias = laudo_mais_recente.get('bacterias_isoladas', [])
-                    if bacterias: st.markdown("<div class='alerta-vermelho'><strong>🔬 Microrganismos Isolados:</strong><br>" + "<br>".join([f"• {b}" for b in bacterias]) + "</div>", unsafe_allow_html=True)
-                    else: st.success("✅ Cultura Negativa / Flora Normal.")
-                    
-                    col_mic1, col_mic2 = st.columns(2)
-                    with col_mic1:
-                        sensiveis = laudo_mais_recente.get('antibioticos_sensiveis', [])
-                        if sensiveis: st.markdown("**✅ Antibiograma (Sensível):**\n" + "\n".join([f"- {s}" for s in sensiveis]))
-                    with col_mic2:
-                        resistentes = laudo_mais_recente.get('antibioticos_resistentes', [])
-                        if resistentes: st.markdown("**🚨 Antibiograma (Resistente):**\n" + "\n".join([f"- {r}" for r in resistentes]))
-                        
-                    st.subheader("💊 Diretriz Terapêutica")
-                    st.warning(f"**Conduta Infecciosa:**\n{laudo_mais_recente.get('conduta_infecciosa', 'N/A')}")
+                macros = laudo_display.get('estrategia_nutricional', {})
+                if macros:
+                    st.info(f"**🔥 Alvo Calórico e Macros:**\nCalorias: {macros.get('calorias_alvo', '')} | Proteínas: {macros.get('macros', {}).get('proteinas', '')} | Carboidratos: {macros.get('macros', {}).get('carboidratos', '')} | Gorduras: {macros.get('macros', {}).get('gorduras', '')}")
+            
+            elif modulo_display == "Microbiologia (Cultura e Antibiograma)":
+                st.subheader("🦠 Análise Microbiológica e Infecciosa")
+                st.info(laudo_display.get('resumo_clinico', ''))
                 
-                else:
-                    st.subheader("📋 Resumo Clínico")
-                    st.write(laudo_mais_recente.get('resumo_clinico', 'Não gerado.'))
-                    if laudo_mais_recente.get('radar_cientifico'): st.info(f"🔬 **Radar Científico:**\n{laudo_mais_recente.get('radar_cientifico')}")
+                bacterias = laudo_display.get('bacterias_isoladas', [])
+                if bacterias: st.markdown("<div class='alerta-vermelho'><strong>🔬 Microrganismos Isolados:</strong><br>" + "<br>".join([f"• {b}" for b in bacterias]) + "</div>", unsafe_allow_html=True)
+                else: st.success("✅ Cultura Negativa / Flora Normal.")
                 
-                nome_arquivo_laudo = f"Laudo_{paciente_ativo.replace(' ', '_')}_{data_mais_recente}"
-                html_final_laudo = gerar_html_laudo(paciente_ativo, data_mais_recente, modulo_selecionado, laudo_mais_recente, html_calculadoras)
-                st.markdown(baixar_html(html_final_laudo, nome_arquivo_laudo), unsafe_allow_html=True)
+                col_mic1, col_mic2 = st.columns(2)
+                with col_mic1:
+                    sensiveis = laudo_display.get('antibioticos_sensiveis', [])
+                    if sensiveis: st.markdown("**✅ Antibiograma (Sensível):**\n" + "\n".join([f"- {s}" for s in sensiveis]))
+                with col_mic2:
+                    resistentes = laudo_display.get('antibioticos_resistentes', [])
+                    if resistentes: st.markdown("**🚨 Antibiograma (Resistente):**\n" + "\n".join([f"- {r}" for r in resistentes]))
+                    
+                st.subheader("💊 Diretriz Terapêutica")
+                st.warning(f"**Conduta Infecciosa:**\n{laudo_display.get('conduta_infecciosa', 'N/A')}")
+            
+            else:
+                st.subheader("📋 Resumo Clínico")
+                st.write(laudo_display.get('resumo_clinico', 'Não gerado.'))
+                if laudo_display.get('radar_cientifico'): st.info(f"🔬 **Radar Científico:**\n{laudo_display.get('radar_cientifico')}")
+            
+            nome_arquivo_laudo = f"Laudo_{paciente_ativo.replace(' ', '_')}_{data_display}"
+            html_final_laudo = gerar_html_laudo(paciente_ativo, data_display, modulo_display, laudo_display, html_calc)
+            st.markdown(baixar_html(html_final_laudo, nome_arquivo_laudo), unsafe_allow_html=True)
 
     # ==========================================
     # ABA 3: SINCRONIZAÇÃO FAMILIAR
@@ -741,47 +732,53 @@ else:
         st.markdown("### 🤝 Alinhamento Metabólico de Casal / Família")
         st.info("Selecione dois pacientes já analisados no sistema para cruzar seus dossiês e gerar uma rotina unificada.")
         
-        st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-        col_f1, col_f2 = st.columns(2)
-        with col_f1: paciente_1 = st.selectbox("Paciente 1 (Base):", ["Selecione..."] + pacientes_salvos, key="p1")
-        with col_f2: paciente_2 = st.selectbox("Paciente 2 (Sincronizar com):", ["Selecione..."] + pacientes_salvos, key="p2")
-        
-        if paciente_1 != "Selecione..." and paciente_2 != "Selecione...":
-            if paciente_1 == paciente_2:
-                st.warning("⚠️ Selecione dois pacientes diferentes.")
-            else:
-                if st.button("🔄 Gerar Planejamento Sincronizado", use_container_width=True):
-                    with st.spinner("Cruzando vias metabólicas..."):
-                        with open(os.path.join(PASTA_BD, f"{paciente_1}.json"), 'r', encoding='utf-8') as f: 
-                            try: hist_p1 = json.load(f)
-                            except: hist_p1 = []
-                        with open(os.path.join(PASTA_BD, f"{paciente_2}.json"), 'r', encoding='utf-8') as f: 
-                            try: hist_p2 = json.load(f)
-                            except: hist_p2 = []
-                        if not hist_p1 or not hist_p2: st.error("Ambos precisam ter histórico.")
-                        else:
-                            resultado_sync = analisador.gerar_sincronizacao_familiar(paciente_1, hist_p1, paciente_2, hist_p2)
-                            try:
-                                dados_sync = json.loads(resultado_sync)
-                                if "erro" in dados_sync: st.error(dados_sync["erro"])
-                                else:
-                                    st.success("Sincronização concluída!")
-                                    st.markdown(f"**🔬 Análise Conjunta:** {dados_sync.get('analise_conjunta', '')}")
-                                    st.markdown("---")
-                                    col_lista1, col_lista2 = st.columns([1, 2])
-                                    with col_lista1:
-                                        st.write("🛒 **Lista Essencial:**")
-                                        for item in dados_sync.get('lista_compras_base', []): st.markdown(f"- {item}")
-                                    with col_lista2:
-                                        st.subheader("🍽️ Refeições (Porções Individuais)")
-                                        for ref in dados_sync.get('refeicoes_sincronizadas', []):
-                                            with st.expander(f"🔹 {ref.get('refeicao', '')} — Base: {ref.get('base_alimentar', '')}"):
-                                                r1, r2 = st.columns(2)
-                                                with r1: st.markdown(f"**{paciente_1}:**<br>{ref.get('porcao_p1', '')}", unsafe_allow_html=True)
-                                                with r2: st.markdown(f"**{paciente_2}:**<br>{ref.get('porcao_p2', '')}", unsafe_allow_html=True)
-                                    st.info(f"💡 **Dica (Meal Prep):** {dados_sync.get('dica_preparo', '')}")
-                            except: st.error("Erro interno de formatação.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        with st.container(border=True):
+            col_f1, col_f2 = st.columns(2)
+            with col_f1: paciente_1 = st.selectbox("Paciente 1 (Base):", ["Selecione..."] + pacientes_salvos, key="p1")
+            with col_f2: paciente_2 = st.selectbox("Paciente 2 (Sincronizar com):", ["Selecione..."] + pacientes_salvos, key="p2")
+            
+            if paciente_1 != "Selecione..." and paciente_2 != "Selecione...":
+                if paciente_1 == paciente_2:
+                    st.warning("⚠️ Selecione dois pacientes diferentes.")
+                else:
+                    if st.button("🔄 Gerar Planejamento Sincronizado", use_container_width=True):
+                        with st.spinner("Cruzando vias metabólicas..."):
+                            with open(os.path.join(PASTA_BD, f"{paciente_1}.json"), 'r', encoding='utf-8') as f: 
+                                try: hist_p1 = json.load(f)
+                                except: hist_p1 = []
+                            with open(os.path.join(PASTA_BD, f"{paciente_2}.json"), 'r', encoding='utf-8') as f: 
+                                try: hist_p2 = json.load(f)
+                                except: hist_p2 = []
+                                
+                            if not hist_p1 or not hist_p2: 
+                                st.error("Ambos precisam ter histórico.")
+                            else:
+                                resultado_sync = analisador.gerar_sincronizacao_familiar(paciente_1, hist_p1, paciente_2, hist_p2)
+                                try:
+                                    dados_sync = json.loads(resultado_sync)
+                                    if "erro" not in dados_sync:
+                                        st.session_state['sync_gerada'] = {'p1': paciente_1, 'p2': paciente_2, 'dados': dados_sync}
+                                    else:
+                                        st.error(dados_sync["erro"])
+                                except: st.error("Erro interno de formatação.")
+                    
+                    if 'sync_gerada' in st.session_state and st.session_state['sync_gerada']['p1'] == paciente_1 and st.session_state['sync_gerada']['p2'] == paciente_2:
+                        dados_sync = st.session_state['sync_gerada']['dados']
+                        st.success("Sincronização concluída!")
+                        st.markdown(f"**🔬 Análise Conjunta:** {dados_sync.get('analise_conjunta', '')}")
+                        st.markdown("---")
+                        col_lista1, col_lista2 = st.columns([1, 2])
+                        with col_lista1:
+                            st.write("🛒 **Lista Essencial:**")
+                            for item in dados_sync.get('lista_compras_base', []): st.markdown(f"- {item}")
+                        with col_lista2:
+                            st.subheader("🍽️ Refeições (Porções Individuais)")
+                            for ref in dados_sync.get('refeicoes_sincronizadas', []):
+                                with st.expander(f"🔹 {ref.get('refeicao', '')} — Base: {ref.get('base_alimentar', '')}"):
+                                    r1, r2 = st.columns(2)
+                                    with r1: st.markdown(f"**{paciente_1}:**<br>{ref.get('porcao_p1', '')}", unsafe_allow_html=True)
+                                    with r2: st.markdown(f"**{paciente_2}:**<br>{ref.get('porcao_p2', '')}", unsafe_allow_html=True)
+                        st.info(f"💡 **Dica (Meal Prep):** {dados_sync.get('dica_preparo', '')}")
 
     # ==========================================
     # ABA 4: CONSULTA TACO
@@ -791,48 +788,47 @@ else:
         diretorio_atual = os.path.dirname(os.path.abspath(__file__))
         caminho_taco = os.path.join(diretorio_atual, "taco.csv")
         
-        st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-        if os.path.exists(caminho_taco):
-            tentativas = [
-                {"sep": ",", "encoding": "utf-8", "skiprows": 0},
-                {"sep": ";", "encoding": "utf-8", "skiprows": 0},
-                {"sep": ",", "encoding": "latin-1", "skiprows": 0},
-                {"sep": ";", "encoding": "latin-1", "skiprows": 0},
-                {"sep": ",", "encoding": "utf-8", "skiprows": 2},
-                {"sep": ";", "encoding": "utf-8", "skiprows": 2},
-                {"sep": ",", "encoding": "latin-1", "skiprows": 2},
-                {"sep": ";", "encoding": "latin-1", "skiprows": 2}
-            ]
-            
-            melhor_df = pd.DataFrame()
-            max_cols = 0
-            for config in tentativas:
-                try:
-                    temp_df = pd.read_csv(caminho_taco, sep=config["sep"], encoding=config["encoding"], skiprows=config["skiprows"], on_bad_lines='skip')
-                    if len(temp_df.columns) > max_cols:
-                        max_cols = len(temp_df.columns)
-                        melhor_df = temp_df
-                except: continue
+        with st.container(border=True):
+            if os.path.exists(caminho_taco):
+                tentativas = [
+                    {"sep": ",", "encoding": "utf-8", "skiprows": 0},
+                    {"sep": ";", "encoding": "utf-8", "skiprows": 0},
+                    {"sep": ",", "encoding": "latin-1", "skiprows": 0},
+                    {"sep": ";", "encoding": "latin-1", "skiprows": 0},
+                    {"sep": ",", "encoding": "utf-8", "skiprows": 2},
+                    {"sep": ";", "encoding": "utf-8", "skiprows": 2},
+                    {"sep": ",", "encoding": "latin-1", "skiprows": 2},
+                    {"sep": ";", "encoding": "latin-1", "skiprows": 2}
+                ]
                 
-            df_taco = melhor_df
-            
-            if not df_taco.empty:
-                df_taco = df_taco.dropna(axis=1, how='all')
-                busca_alimento = st.text_input("🔍 Procure o alimento (ex: frango, leite, arroz):")
+                melhor_df = pd.DataFrame()
+                max_cols = 0
+                for config in tentativas:
+                    try:
+                        temp_df = pd.read_csv(caminho_taco, sep=config["sep"], encoding=config["encoding"], skiprows=config["skiprows"], on_bad_lines='skip')
+                        if len(temp_df.columns) > max_cols:
+                            max_cols = len(temp_df.columns)
+                            melhor_df = temp_df
+                    except: continue
+                    
+                df_taco = melhor_df
                 
-                if busca_alimento:
-                    busca_lower = busca_alimento.lower()
-                    mask = np.column_stack([df_taco[col].astype(str).str.lower().str.contains(busca_lower, na=False) for col in df_taco.columns])
-                    resultado = df_taco.loc[mask.any(axis=1)]
-                    if not resultado.empty: st.dataframe(resultado, use_container_width=True)
-                    else: st.warning("Alimento não encontrado.")
+                if not df_taco.empty:
+                    df_taco = df_taco.dropna(axis=1, how='all')
+                    busca_alimento = st.text_input("🔍 Procure o alimento (ex: frango, leite, arroz):")
+                    
+                    if busca_alimento:
+                        busca_lower = busca_alimento.lower()
+                        mask = np.column_stack([df_taco[col].astype(str).str.lower().str.contains(busca_lower, na=False) for col in df_taco.columns])
+                        resultado = df_taco.loc[mask.any(axis=1)]
+                        if not resultado.empty: st.dataframe(resultado, use_container_width=True)
+                        else: st.warning("Alimento não encontrado.")
+                    else:
+                        st.dataframe(df_taco.head(50), use_container_width=True)
                 else:
-                    st.dataframe(df_taco.head(50), use_container_width=True)
+                    st.error("O ficheiro existe, mas está corrompido.")
             else:
-                st.error("O ficheiro existe, mas está corrompido.")
-        else:
-            st.error(f"⚠️ O ficheiro 'taco.csv' não foi encontrado na pasta do sistema.")
-        st.markdown("</div>", unsafe_allow_html=True)
+                st.error(f"⚠️ O ficheiro 'taco.csv' não foi encontrado na pasta do sistema.")
 
     # ==========================================
     # ABA 5: PRESCRIÇÃO DE CARDÁPIO
@@ -864,70 +860,62 @@ else:
                         sugestao_dieta_ia = "Dieta Mediterrânea (Foco Anti-inflamatório / Controle Lipídico)"
                         break
 
-                st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-                col_dec1, col_dec2 = st.columns([1, 1])
-                with col_dec1:
-                    st.markdown("#### 🚨 Condições Clínicas Detetadas:")
-                    if alertas:
-                        for alerta in alertas: st.markdown(f"- <span style='color:#fca5a5;'>{alerta}</span>", unsafe_allow_html=True)
-                    else: st.success("✅ Nenhum marcador de risco crítico detetado.")
-                    st.info(f"💡 **Recomendação da IA:** Sugere-se a adoção da linha **{sugestao_dieta_ia}**.")
-                
-                with col_dec2:
-                    st.markdown("#### 🎯 Alvo Macronutricional Ativo:")
-                    if isinstance(macros, dict) and macros.get('macros'):
-                        st.write(f"**Calorias Totais:** {macros.get('calorias_alvo', 'N/A')}")
-                        st.write(f"**Proteínas:** {macros.get('macros', {}).get('proteinas', 'N/A')}")
-                        st.write(f"**Carboidratos:** {macros.get('macros', {}).get('carboidratos', 'N/A')}")
-                        st.write(f"**Gorduras:** {macros.get('macros', {}).get('gorduras', 'N/A')}")
-                        st.caption(f"*Justificativa:* {macros.get('justificativa_clinica', '')}")
-                    else: st.warning("Estratégia de macros não encontrada no último laudo.")
-                st.markdown("</div>", unsafe_allow_html=True)
+                with st.container(border=True):
+                    col_dec1, col_dec2 = st.columns([1, 1])
+                    with col_dec1:
+                        st.markdown("#### 🚨 Condições Clínicas Detetadas:")
+                        if alertas:
+                            for alerta in alertas: st.markdown(f"- <span style='color:#fca5a5;'>{alerta}</span>", unsafe_allow_html=True)
+                        else: st.success("✅ Nenhum marcador de risco crítico detetado.")
+                        st.info(f"💡 **Recomendação da IA:** Sugere-se a adoção da linha **{sugestao_dieta_ia}**.")
+                    
+                    with col_dec2:
+                        st.markdown("#### 🎯 Alvo Macronutricional Ativo:")
+                        if isinstance(macros, dict) and macros.get('macros'):
+                            st.write(f"**Calorias Totais:** {macros.get('calorias_alvo', 'N/A')}")
+                            st.write(f"**Proteínas:** {macros.get('macros', {}).get('proteinas', 'N/A')}")
+                            st.write(f"**Carboidratos:** {macros.get('macros', {}).get('carboidratos', 'N/A')}")
+                            st.write(f"**Gorduras:** {macros.get('macros', {}).get('gorduras', 'N/A')}")
+                            st.caption(f"*Justificativa:* {macros.get('justificativa_clinica', '')}")
+                        else: st.warning("Estratégia de macros não encontrada no último laudo.")
                 
                 st.markdown("### 📋 Configuração da Dieta Semanal")
-                st.markdown("<div class='caixa-evolucao'>", unsafe_allow_html=True)
-                col_cfg1, col_cfg2 = st.columns(2)
-                with col_cfg1:
-                    estrategia_escolhida = st.selectbox("Linha Dietética a Aplicar (Validação):", [
-                        "Padrão / Reeducação Alimentar",
-                        "Dieta Mediterrânea (Foco Anti-inflamatório/Lipídios)",
-                        "Low Carb (Foco Sensibilidade à Insulina)",
-                        "Ciclo de Carboidratos (Foco Alta Performance/Hipertrofia)",
-                        "Plant-Based / Vegetariana"
-                    ])
-                with col_cfg2:
-                    restricoes = st.text_input("Restrições e Preferências:", placeholder="Ex: Alérgico a castanhas, treina às 19h...")
+                with st.container(border=True):
+                    col_cfg1, col_cfg2 = st.columns(2)
+                    with col_cfg1:
+                        estrategia_escolhida = st.selectbox("Linha Dietética a Aplicar (Validação):", [
+                            "Padrão / Reeducação Alimentar",
+                            "Dieta Mediterrânea (Foco Anti-inflamatório/Lipídios)",
+                            "Low Carb (Foco Sensibilidade à Insulina)",
+                            "Ciclo de Carboidratos (Foco Alta Performance/Hipertrofia)",
+                            "Plant-Based / Vegetariana"
+                        ])
+                    with col_cfg2:
+                        restricoes = st.text_input("Restrições e Preferências:", placeholder="Ex: Alérgico a castanhas, treina às 19h...")
+                        
+                    caminho_cardapio = os.path.join(PASTA_BD, f"{paciente_ativo}_cardapio.json")
                     
-                # --- NOVO: PERSISTÊNCIA E DOWNLOAD DO CARDÁPIO ---
-                caminho_cardapio = os.path.join(PASTA_BD, f"{paciente_ativo}_cardapio.json")
-                
-                if st.button("🍽️ Gerar Cardápio Semanal Sob Medida", use_container_width=True):
-                    with st.spinner("Construindo as refeições..."):
-                        cardapio_gerado = analisador.gerar_cardapio_semanal(paciente_ativo, laudo_recente, estrategia_escolhida, restricoes)
-                        
-                        # Salvar cardapio para não perder no F5
-                        with open(caminho_cardapio, 'w', encoding='utf-8') as fc:
-                            json.dump({"cardapio": cardapio_gerado}, fc, ensure_ascii=False)
+                    if st.button("🍽️ Gerar Cardápio Semanal Sob Medida", use_container_width=True):
+                        with st.spinner("Construindo as refeições..."):
+                            cardapio_gerado = analisador.gerar_cardapio_semanal(paciente_ativo, laudo_recente, estrategia_escolhida, restricoes)
                             
-                        st.rerun() # Atualiza a página para exibir o cardápio salvo
-                
-                # Exibir cardápio persistido na tela
-                if os.path.exists(caminho_cardapio):
-                    with open(caminho_cardapio, 'r', encoding='utf-8') as fc:
-                        dados_c = json.load(fc)
-                        cardapio_gerado = dados_c.get("cardapio", "")
-                        
-                    if cardapio_gerado:
-                        st.success("Último Cardápio formulado carregado com sucesso!")
-                        
-                        # Botão de Download HTML
-                        html_c = gerar_html_cardapio(paciente_ativo, cardapio_gerado)
-                        st.markdown(baixar_html(html_c, f"Cardapio_{paciente_ativo}"), unsafe_allow_html=True)
-                        
-                        st.markdown("<div style='background: rgba(15, 23, 42, 0.5); padding:20px; border-radius:10px;'>", unsafe_allow_html=True)
-                        st.markdown(cardapio_gerado)
-                        st.markdown("</div>", unsafe_allow_html=True)
-                # ---------------------------------------------------
+                            with open(caminho_cardapio, 'w', encoding='utf-8') as fc:
+                                json.dump({"cardapio": cardapio_gerado}, fc, ensure_ascii=False)
+                                
+                            st.rerun() 
+                    
+                    if os.path.exists(caminho_cardapio):
+                        with open(caminho_cardapio, 'r', encoding='utf-8') as fc:
+                            dados_c = json.load(fc)
+                            cardapio_gerado = dados_c.get("cardapio", "")
+                            
+                        if cardapio_gerado:
+                            st.success("Último Cardápio formulado carregado com sucesso!")
+                            html_c = gerar_html_cardapio(paciente_ativo, cardapio_gerado)
+                            st.markdown(baixar_html(html_c, f"Cardapio_{paciente_ativo}"), unsafe_allow_html=True)
+                            st.markdown("<div style='background: rgba(15, 23, 42, 0.5); padding:20px; border-radius:10px;'>", unsafe_allow_html=True)
+                            st.markdown(cardapio_gerado)
+                            st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================
     # ABA 6: MICROSCOPIA E VISÃO COMPUTACIONAL
@@ -939,68 +927,76 @@ else:
         col_m1, col_m2 = st.columns([1, 2])
         
         with col_m1:
-            st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-            tipo_lamina = st.selectbox("Foco da Análise Laboratorial:", [
-                "Esfregaço Sanguíneo (Série Vermelha e Branca)",
-                "Microbiologia (Coloração de Gram / Ziehl-Neelsen)",
-                "Sedimentoscopia de Urina (EAS)",
-                "Parasitologia / Fezes",
-                "Morfologia Celular Geral"
-            ])
-            contexto_lamina = st.text_area("Contexto Clínico ou Suspeita:", placeholder="Ex: Suspeita de anemia...")
-            imagem_lamina = st.file_uploader("Upload da Lâmina (JPG/PNG)", type=["jpg", "jpeg", "png"])
-            
-            if imagem_lamina:
-                st.image(imagem_lamina, caption="Lâmina Carregada", use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                tipo_lamina = st.selectbox("Foco da Análise Laboratorial:", [
+                    "Esfregaço Sanguíneo (Série Vermelha e Branca)",
+                    "Microbiologia (Coloração de Gram / Ziehl-Neelsen)",
+                    "Sedimentoscopia de Urina (EAS)",
+                    "Parasitologia / Fezes",
+                    "Morfologia Celular Geral"
+                ])
+                contexto_lamina = st.text_area("Contexto Clínico ou Suspeita:", placeholder="Ex: Suspeita de anemia...")
+                imagem_lamina = st.file_uploader("Upload da Lâmina (JPG/PNG)", type=["jpg", "jpeg", "png"])
+                
+                if imagem_lamina:
+                    st.image(imagem_lamina, caption="Lâmina Carregada", use_container_width=True)
                 
         with col_m2:
-            st.markdown("<div class='painel-decisao'>", unsafe_allow_html=True)
-            if imagem_lamina and st.button("🔍 Iniciar Varredura Morfológica", use_container_width=True):
-                with st.spinner("A rede neural está a varrer a morfologia e os padrões de coloração..."):
-                    img_bytes = imagem_lamina.getvalue()
-                    resultado_lamina = analisador.analisar_lamina_microscopia(img_bytes, contexto_lamina, tipo_lamina)
-                    
-                    try:
-                        dados_lamina = json.loads(resultado_lamina)
-                        if "erro" in dados_lamina:
-                            st.error(dados_lamina["erro"])
-                        else:
-                            st.success("✅ Varredura Morfológica Concluída!")
-                            
-                            st.markdown("#### 🔬 Achados Estruturais na Lâmina")
-                            for achado in dados_lamina.get("achados_morfologicos", []):
-                                st.markdown(f"**• {achado.get('estrutura', 'Estrutura')}:** {achado.get('descricao', '')}")
-                            
-                            st.markdown("---")
-                            st.markdown(f"**🧫 Qualidade da Amostra:** {dados_lamina.get('qualidade_amostra', 'N/A')}")
-                            st.info(f"**🩺 Hipótese Diagnóstica de Bancada:** {dados_lamina.get('hipotese_diagnostica', 'N/A')}")
-                            
-                            alertas = dados_lamina.get("alertas", [])
-                            if alertas:
-                                st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Morfológicos Identificados:</strong><br>" + "<br>".join([f"• {a}" for a in alertas]) + "</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                if imagem_lamina and st.button("🔍 Iniciar Varredura Morfológica", use_container_width=True):
+                    with st.spinner("A rede neural está a varrer a morfologia e os padrões de coloração..."):
+                        img_bytes = imagem_lamina.getvalue()
+                        resultado_lamina = analisador.analisar_lamina_microscopia(img_bytes, contexto_lamina, tipo_lamina)
+                        
+                        try:
+                            dados_lamina = json.loads(resultado_lamina)
+                            if "erro" not in dados_lamina:
+                                st.session_state['micro_gerada'] = {
+                                    'paciente': paciente_ativo,
+                                    'dados': dados_lamina,
+                                    'foco': tipo_lamina,
+                                    'contexto': contexto_lamina
+                                }
                             else:
-                                st.success("Nenhuma atipia crítica ou alerta morfológico grave identificado.")
-                                
-                            data_atual = datetime.now().strftime('%d/%m/%Y')
-                            linhas_achados = "".join([f"<li><strong>{a.get('estrutura', '')}:</strong> {a.get('descricao', '')}</li>" for a in dados_lamina.get("achados_morfologicos", [])])
-                            alertas_html = f"<div style='background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; color: #b91c1c;'><strong>🚨 Alertas Morfológicos:</strong><ul>{''.join([f'<li>{a}</li>' for a in alertas])}</ul></div>" if alertas else ""
-                                
-                            html_microscopia = f"""
-                            <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo de Microscopia - {paciente_ativo}</title>
-                            <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} ul {{ padding-left: 20px; }} li {{ margin-bottom: 8px; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
-                            </head><body><div class="header"><h1>LAUDO DE MICROSCOPIA DIGITAL</h1><h3>Análise Morfológica Assistida por IA</h3></div>
-                            <p><strong>Paciente:</strong> {paciente_ativo} | <strong>Data da Análise:</strong> {data_atual}</p><p><strong>Foco da Análise:</strong> {tipo_lamina}</p><p><strong>Contexto Clínico:</strong> {contexto_lamina}</p>
-                            {alertas_html}<h2>🔬 Achados Estruturais</h2><div class="box"><ul>{linhas_achados}</ul></div>
-                            <h2>🧫 Qualidade da Amostra</h2><p>{dados_lamina.get('qualidade_amostra', 'N/A')}</p>
-                            <h2>🩺 Hipótese Diagnóstica</h2><div class="box" style="background-color: #f0fdf4; border-color: #22c55e;"><p><strong>Conclusão de Bancada:</strong> {dados_lamina.get('hipotese_diagnostica', 'N/A')}</p></div>
-                            <div class="footer">Gerado por Nexus Clínico - Visão Computacional para Biomedicina.</div></body></html>
-                            """
-                            nome_arquivo_micro = f"Microscopia_{paciente_ativo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}"
-                            st.markdown(baixar_html(html_microscopia, nome_arquivo_micro), unsafe_allow_html=True)
-                                
-                    except json.JSONDecodeError: st.error("Erro: A IA não retornou o formato estruturado correto.")
-            else:
-                st.markdown("#### Resultados da Varredura")
-                st.write("Aguardando upload da fotografia e o comando para iniciar a varredura neural...")
-            st.markdown("</div>", unsafe_allow_html=True)
+                                st.error(dados_lamina["erro"])
+                        except json.JSONDecodeError: st.error("Erro: A IA não retornou o formato estruturado correto.")
+                
+                if 'micro_gerada' in st.session_state and st.session_state['micro_gerada']['paciente'] == paciente_ativo:
+                    dados_lamina = st.session_state['micro_gerada']['dados']
+                    tipo_lamina_display = st.session_state['micro_gerada']['foco']
+                    contexto_lamina_display = st.session_state['micro_gerada']['contexto']
+                    
+                    st.success("✅ Varredura Morfológica Concluída!")
+                    st.markdown("#### 🔬 Achados Estruturais na Lâmina")
+                    for achado in dados_lamina.get("achados_morfologicos", []):
+                        st.markdown(f"**• {achado.get('estrutura', 'Estrutura')}:** {achado.get('descricao', '')}")
+                    
+                    st.markdown("---")
+                    st.markdown(f"**🧫 Qualidade da Amostra:** {dados_lamina.get('qualidade_amostra', 'N/A')}")
+                    st.info(f"**🩺 Hipótese Diagnóstica de Bancada:** {dados_lamina.get('hipotese_diagnostica', 'N/A')}")
+                    
+                    alertas = dados_lamina.get("alertas", [])
+                    if alertas:
+                        st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Morfológicos Identificados:</strong><br>" + "<br>".join([f"• {a}" for a in alertas]) + "</div>", unsafe_allow_html=True)
+                    else:
+                        st.success("Nenhuma atipia crítica ou alerta morfológico grave identificado.")
+                        
+                    data_atual = datetime.now().strftime('%d/%m/%Y')
+                    linhas_achados = "".join([f"<li><strong>{a.get('estrutura', '')}:</strong> {a.get('descricao', '')}</li>" for a in dados_lamina.get("achados_morfologicos", [])])
+                    alertas_html = f"<div style='background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; color: #b91c1c;'><strong>🚨 Alertas Morfológicos:</strong><ul>{''.join([f'<li>{a}</li>' for a in alertas])}</ul></div>" if alertas else ""
+                        
+                    html_microscopia = f"""
+                    <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo de Microscopia - {paciente_ativo}</title>
+                    <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} ul {{ padding-left: 20px; }} li {{ margin-bottom: 8px; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
+                    </head><body><div class="header"><h1>LAUDO DE MICROSCOPIA DIGITAL</h1><h3>Análise Morfológica Assistida por IA</h3></div>
+                    <p><strong>Paciente:</strong> {paciente_ativo} | <strong>Data da Análise:</strong> {data_atual}</p><p><strong>Foco da Análise:</strong> {tipo_lamina_display}</p><p><strong>Contexto Clínico:</strong> {contexto_lamina_display}</p>
+                    {alertas_html}<h2>🔬 Achados Estruturais</h2><div class="box"><ul>{linhas_achados}</ul></div>
+                    <h2>🧫 Qualidade da Amostra</h2><p>{dados_lamina.get('qualidade_amostra', 'N/A')}</p>
+                    <h2>🩺 Hipótese Diagnóstica</h2><div class="box" style="background-color: #f0fdf4; border-color: #22c55e;"><p><strong>Conclusão de Bancada:</strong> {dados_lamina.get('hipotese_diagnostica', 'N/A')}</p></div>
+                    <div class="footer">Gerado por Nexus Clínico - Visão Computacional para Biomedicina.</div></body></html>
+                    """
+                    nome_arquivo_micro = f"Microscopia_{paciente_ativo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}"
+                    st.markdown(baixar_html(html_microscopia, nome_arquivo_micro), unsafe_allow_html=True)
+                elif not imagem_lamina:
+                    st.markdown("#### Resultados da Varredura")
+                    st.write("Aguardando upload da fotografia e o comando para iniciar a varredura neural...")
