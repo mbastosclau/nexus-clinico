@@ -1,1002 +1,1211 @@
 import streamlit as st
+import os
+import io
+import time
 import json
 import base64
-import os
-import re
+import tempfile
+import urllib.request
 from datetime import datetime
+from PIL import Image
 import PyPDF2
-import pandas as pd
-import numpy as np
-import analisador
 from supabase import create_client, Client
-from dotenv import load_dotenv
+from fpdf import FPDF
+import anthropic
+from streamlit_drawable_canvas import st_canvas
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Nexus Clínico", page_icon="🧬", layout="wide")
-# --- ESCONDER MENU DO STREAMLIT ---
+# ================= 1. CONFIGURAÇÕES E CHAVES =================
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://xhkekpyokrcvhgepatmc.supabase.co")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "sb_publishable__lopYakoLGVj7-uFY25r4A_9Hzs-2nN")
+ANTHROPIC_API_KEY = st.secrets.get("ANTHROPIC_API_KEY", "")
+
+# Configuração ajustada para garantir expansão inicial no mobile
+st.set_page_config(
+    page_title="Nexus Estética AI", 
+    layout="wide", 
+    page_icon="✨",
+    initial_sidebar_state="expanded"
+)
+
+if "supabase_client" not in st.session_state:
+    st.session_state.supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase: Client = st.session_state.supabase_client
+
+# ================= MAPA REGULATÓRIO MULTI-CONSELHO =================
+MAPA_CONSELHOS = {
+    "CRBM": {
+        "orgao": "Conselho Federal de Biomedicina (CFBM)",
+        "resolucoes": "Resoluções CFBM nº 241/2014 (atos do biomédico em estética) e nº 359/2023 (tricologia e complementos)",
+        "limites": "Procedimentos injetáveis, bioestimulação, fios e tecnologias dentro da habilitação em Biomedicina Estética.",
+        "termo_profissional": "Biomédico(a) Esteta"
+    },
+    "CRO": {
+        "orgao": "Conselho Federal de Odontologia (CFO)",
+        "resolucoes": "Resolução CFO nº 198/2019 (reconhecimento da Harmonização Orofacial como especialidade)",
+        "limites": "Região anatômica de cabeça e pescoço, a partir de linha que tangencia o osso hióide até o terço superior facial, com finalidade funcional e estética.",
+        "termo_profissional": "Cirurgião(ã)-Dentista / Especialista em HOF"
+    },
+    "CRM": {
+        "orgao": "Conselho Federal de Medicina (CFM)",
+        "resolucoes": "Resolução CFM nº 2.336/2023 e pareceres técnicos da SBD e SBCP",
+        "limites": "Diagnóstico nosológico, prescrição médica integral e execução de procedimentos invasivos faciais e corporais.",
+        "termo_profissional": "Médico(a)"
+    },
+    "COREN": {
+        "orgao": "Conselho Federal de Enfermagem (COFEN)",
+        "resolucoes": "Resoluções COFEN nº 529/2016 e nº 626/2020",
+        "limites": "Consulta de enfermagem estética, avaliação tecidual e administração de substâncias autorizadas por pós-graduação lato sensu.",
+        "termo_profissional": "Enfermeiro(a) Esteta"
+    },
+    "CRF": {
+        "orgao": "Conselho Federal de Farmácia (CFF)",
+        "resolucoes": "Resoluções CFF nº 616/2015 e nº 645/2017",
+        "limites": "Saúde estética e responsabilidade técnica em procedimentos injetáveis não cirúrgicos pelo farmacêutico habilitado.",
+        "termo_profissional": "Farmacêutico(a) Esteta"
+    }
+}
+
+# ================= 2. ESTÉTICA VISUAL (CSS) =================
+# Mantém o botão de expansão lateral do mobile ativo e remove apenas a barra superior desnecessária
 st.markdown("""
     <style>
-    [data-testid="stHeader"] {visibility: hidden !important;}
-    [data-testid="stToolbar"] {visibility: hidden !important;}
-    footer {visibility: hidden !important;}
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;}
+    .stButton>button {
+        background-color: #C5A880 !important;
+        color: white !important;
+        border-radius: 8px !important;
+        border: none !important;
+        height: 50px !important;
+        font-weight: bold !important;
+        transition: all 0.3s ease-in-out !important;
+    }
+    .stButton>button:hover {
+        background-color: #A4865D !important;
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.1) !important;
+    }
+    h1, h2, h3 { color: #2C3E50; font-family: 'Georgia', serif; }
+    [data-testid="stSidebar"] { background-color: #FAF8F5; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONEXÃO COM A NUVEM ---
-load_dotenv(override=True)
+# Gestão de Sessão Persistente
+if "usuario_logado" not in st.session_state:
+    st.session_state.usuario_logado = None
+if "perfil_profissional" not in st.session_state:
+    st.session_state.perfil_profissional = None
+if "laudo_ativo" not in st.session_state:
+    st.session_state.laudo_ativo = None
+if "pdf_plano_bytes" not in st.session_state:
+    st.session_state.pdf_plano_bytes = None
+if "pdf_tcle_bytes" not in st.session_state:
+    st.session_state.pdf_tcle_bytes = None
+if "paciente_atendido" not in st.session_state:
+    st.session_state.paciente_atendido = ""
+if "ultimo_pront_id" not in st.session_state:
+    st.session_state.ultimo_pront_id = None
+if "ultimo_pac_id" not in st.session_state:
+    st.session_state.ultimo_pac_id = None
 
-@st.cache_resource
-def init_supabase() -> Client:
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
-    if not url or not key:
+# Auto-reconectar via Parâmetro de URL após F5
+if not st.session_state.usuario_logado and "user_id" in st.query_params:
+    saved_id = st.query_params["user_id"]
+    try:
+        perfil_auto = supabase.table("profissionais").select("*").eq("id", saved_id).execute()
+        if perfil_auto.data:
+            st.session_state.perfil_profissional = perfil_auto.data[0]
+            st.session_state.usuario_logado = type('obj', (object,), {'id': saved_id})()
+    except Exception:
+        pass
+
+# ================= 3. GERADORES DE PDF EXECUTIVOS =================
+def sanitizar_texto(texto):
+    substituicoes = {
+        '**': '', '###': '', '##': '', '#': '', '–': '-', '—': '-',
+        '≥': '>=', '≤': '<=', '“': '"', '”': '"', '’': "'", '‘': "'",
+        '•': '-', '|': ' - ', '>': ''
+    }
+    for k, v in substituicoes.items():
+        texto = texto.replace(k, v)
+        
+    chars = []
+    for c in texto:
+        try:
+            c.encode('latin-1')
+            chars.append(c)
+        except UnicodeEncodeError:
+            chars.append(' ')
+    return "".join(chars)
+
+def baixar_logo_temporario(url):
+    if not url:
         return None
-    url = url.strip().strip('"').strip("'")
-    key = key.strip().strip('"').strip("'")
-    return create_client(url, key)
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            conteudo = response.read()
+            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            img = Image.open(io.BytesIO(conteudo))
+            img.thumbnail((300, 100), Image.Resampling.LANCZOS)
+            img.save(tmp.name, format="PNG")
+            return tmp.name
+    except Exception:
+        return None
 
-supabase = init_supabase()
+class PDFLaudo(FPDF):
+    def __init__(self, nome_paciente, foco_caso, dados_prof=None, caminho_logo_temp=None):
+        super().__init__(orientation='P', unit='mm', format='A4')
+        self.nome_paciente = nome_paciente
+        self.foco_caso = foco_caso
+        self.dados_prof = dados_prof
+        self.caminho_logo_temp = caminho_logo_temp
 
-# --- SISTEMA DE AUTENTICAÇÃO E BLOQUEIO ---
-if 'usuario_logado' not in st.session_state:
-    st.session_state['usuario_logado'] = None
-
-if not st.session_state['usuario_logado']:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("<div style='background: rgba(30, 41, 59, 0.65); padding: 20px; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 10px 30px rgba(0,0,0,0.4);'>", unsafe_allow_html=True)
-        st.markdown("<h1 style='text-align: center; color: #38bdf8; font-size: 2.8em; margin-bottom: 0;'>🧬 Nexus Clínico</h1>", unsafe_allow_html=True)
-        st.markdown("<h3 style='text-align: center; color: #94a3b8; font-weight: 400; margin-top: 0;'>Plataforma Comercial SaaS</h3><br>", unsafe_allow_html=True)
+    def header(self):
+        self.set_fill_color(197, 168, 128)
+        self.rect(0, 0, 210, 14, 'F')
         
-        tab_login, tab_registro = st.tabs(["🔐 Entrar no Sistema", "📝 Criar Conta de Profissional"])
+        if self.caminho_logo_temp and os.path.exists(self.caminho_logo_temp):
+            try:
+                self.image(self.caminho_logo_temp, x=10, y=2, h=10)
+                self.set_xy(45, 4)
+            except Exception:
+                self.set_xy(10, 4)
+        else:
+            self.set_xy(10, 4)
+            
+        self.set_font("Arial", 'B', 9.5)
+        self.set_text_color(255, 255, 255)
+        self.cell(0, 6, txt="NEXUS ESTETICA - PLANEJAMENTO E CONDUTA CLINICA", ln=True, align='C')
+        self.ln(2)
         
-        with tab_login:
-            email_login = st.text_input("E-mail Profissional:", key="log_email")
-            senha_login = st.text_input("Senha:", type="password", key="log_senha")
-            if st.button("Acessar Plataforma", use_container_width=True):
-                if not supabase:
-                    st.error("Erro Crítico: Falha na conexão. Verifique o arquivo .env.")
-                else:
-                    try:
-                        response = supabase.auth.sign_in_with_password({"email": email_login, "password": senha_login})
-                        if response.user:
-                            st.session_state['usuario_logado'] = response.user
-                            st.rerun()
-                        else:
-                            st.error("Falha ao validar os dados do usuário.")
-                    except Exception as e:
-                        st.error(f"Erro: {str(e)}")
+        self.set_text_color(44, 62, 80)
+        self.set_font("Arial", 'B', 7.5)
+        prof_info = ""
+        if self.dados_prof:
+            conselho_rotulo = self.dados_prof.get('conselho', 'CRBM')
+            prof_info = f" | Resp: {self.dados_prof.get('nome')} ({conselho_rotulo} {self.dados_prof.get('registro')})"
+        self.cell(0, 4, txt=f"Paciente: {self.nome_paciente} | Foco: {self.foco_caso}{prof_info}", ln=True)
+        self.line(10, 21, 200, 21)
+        self.ln(3)
 
-        with tab_registro:
-            nome_completo = st.text_input("Nome Completo do Profissional:", key="reg_nome")
-            email_novo = st.text_input("E-mail de Trabalho:", key="reg_email")
-            senha_nova = st.text_input("Crie uma Senha (mín. 6 dígitos):", type="password", key="reg_senha")
-            if st.button("Registrar Nova Clínica / Profissional", use_container_width=True):
-                if not supabase:
-                    st.error("Erro de conexão com o banco.")
-                else:
+    def footer(self):
+        self.set_y(-14)
+        self.set_font("Arial", 'I', 6.2)
+        self.set_text_color(130, 130, 130)
+        aviso_legal = "Nexus Estetica AI: Ferramenta analitica de suporte a decisao clinica. A indicacao, posologia e execucao cabem exclusivamente ao profissional responsavel."
+        self.cell(0, 3.5, txt=aviso_legal, ln=True, align='C')
+        self.cell(0, 3.5, f"Pagina {self.page_no()}", align='C')
+
+def gerar_pdf(texto_laudo, nome_paciente, foco_caso, dados_prof=None):
+    logo_temp = None
+    if dados_prof and dados_prof.get("logo_url"):
+        logo_temp = baixar_logo_temporario(dados_prof.get("logo_url"))
+
+    pdf = PDFLaudo(nome_paciente, foco_caso, dados_prof, logo_temp)
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+    
+    pdf.set_font("Arial", size=7.2)
+    pdf.set_text_color(30, 30, 30)
+    texto_final = sanitizar_texto(texto_laudo)
+    
+    pdf.multi_cell(0, 3.2, txt=texto_final)
+    
+    pdf.ln(4)
+    y_atual = pdf.get_y()
+    
+    if y_atual > 225:
+        pdf.add_page()
+        y_atual = 25
+        
+    pdf.set_font("Arial", 'I', 6.5)
+    pdf.set_text_color(95, 95, 95)
+    termo_resp = (
+        "RESSALVA REGULATORIA E RESPONSABILIDADE TECNICA: O presente parecer clinico foi emitido com suporte de "
+        "inteligencia artificial analitica do Nexus Estetica como ferramenta de auxilio a decisao profissional. "
+        "A anamnese soberana, confirmacao diagnostica, indicacao posologica, aplicacao tecnica e o manejo de "
+        "quaisquer intercorrencias sao de competencia e responsabilidade etica e tecnica indelegavel do(a) "
+        "profissional assistente subscrito(a), nos exatos termos das normativas do seu conselho profissional."
+    )
+    pdf.multi_cell(0, 3.0, txt=sanitizar_texto(termo_resp))
+    
+    pdf.ln(5)
+    y_pos_termo = pdf.get_y()
+    if y_pos_termo > 245:
+        pdf.add_page()
+        y_pos_termo = 25
+        
+    y_ass = y_pos_termo + 6
+    pdf.set_font("Arial", 'B', 7.5)
+    pdf.line(15, y_ass, 95, y_ass)
+    pdf.line(115, y_ass, 195, y_ass)
+    
+    nome_prof = dados_prof.get('nome') if dados_prof else "Responsavel Tecnico"
+    reg_prof = f"{dados_prof.get('conselho')} {dados_prof.get('registro')}" if dados_prof else "Registro"
+    
+    pdf.set_xy(15, y_ass + 2)
+    pdf.cell(80, 4, txt=f"{nome_prof} - {reg_prof}", align='C')
+    pdf.set_xy(115, y_ass + 2)
+    pdf.cell(80, 4, txt=f"{nome_paciente} (Paciente)", align='C')
+    
+    saida = pdf.output(dest='S')
+    
+    if logo_temp and os.path.exists(logo_temp):
+        try:
+            os.remove(logo_temp)
+        except Exception:
+            pass
+
+    return saida.encode('latin-1') if isinstance(saida, str) else bytes(saida)
+
+def gerar_tcle_pdf(nome_paciente, foco_caso, dados_prof=None, caminho_assinatura_img=None):
+    logo_temp = None
+    if dados_prof and dados_prof.get("logo_url"):
+        logo_temp = baixar_logo_temporario(dados_prof.get("logo_url"))
+
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+    
+    pdf.set_fill_color(197, 168, 128)
+    pdf.rect(0, 0, 210, 14, 'F')
+    
+    if logo_temp and os.path.exists(logo_temp):
+        try:
+            pdf.image(logo_temp, x=10, y=2, h=10)
+        except Exception:
+            pass
+
+    pdf.set_font("Arial", 'B', 9.5)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 6, txt="TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO (TCLE) E USO DE IMAGEM", ln=True, align='C')
+    
+    pdf.ln(4)
+    pdf.set_text_color(44, 62, 80)
+    pdf.set_font("Arial", 'B', 8)
+    nome_prof = dados_prof.get('nome') if dados_prof else "Responsavel Tecnico"
+    reg_prof = f"{dados_prof.get('conselho')} {dados_prof.get('registro')}" if dados_prof else "Registro"
+    
+    pdf.cell(0, 5, txt=f"Paciente: {nome_paciente} | Profissional: {nome_prof} ({reg_prof})", ln=True)
+    pdf.line(10, 25, 200, 25)
+    pdf.ln(4)
+    
+    texto_tcle = f"""
+1. DECLARACAO DE CONSENTIMENTO E ESCLARECIMENTO CLINICO
+Eu, {nome_paciente}, declaro que fui devidamente avaliado(a) e esclarecido(a) pelo(a) profissional {nome_prof} sobre o diagnostico etiologico facial, plano de tratamento personalizado ({foco_caso}), riscos inerentes, contraindicacoes e cuidados requeridos.
+
+2. PROCEDIMENTOS PREVISTOS NO PLANO CLINICO
+Declaro estar ciente de que as condutas prescritas podem envolver o uso de neuromoduladores (toxina botulinica), preenchedores absorviveis (acido hialuronico), bioestimuladores de colageno (PLLA/CaHA), fios de sustentacao (PDO), esvaziadores enzimaticos, biorregeneradores dérmicos (PDRN) ou tecnologias associadas, segundo o plano sequencial individual.
+
+3. RISCOS, INTERCORRENCIAS E RESPOSTA BIOLOGICA INDIVIDUAL
+Fui advertido(a) de que os procedimentos esteticos injetaveis e minimamente invasivos envolvem respostas biologicas individuais, podendo ocorrer:
+- Edema (inchaco), eritema (vermelhidao), sensibilidade dolorosa local e hematomas/equimoses transitorios.
+- Reacoes inflamatorias, formacao de nodulos palpaveis ou granulomas, passíveis de intervencao clinica e medicamentosa.
+- Assimetrias temporarias decorrentes de tonus muscular ou acomodacao de materiais, requerendo reavaliacao em 15 a 30 dias.
+- Risco vascular (isquemia/oclusao arterial), sendo informado(a) sobre a existencia de protocolos imediatos de resgate com hialuronidase e condutas de emergencia.
+
+4. COMPROMISSO COM AS ORIENTACOES POS-PROCEDIMENTO
+Comprometo-me a seguir rigorosamente todas as instrucoes pós-aplicacao (repouso de atividades fisicas intensas, fotoprotecao estrita, evitar manipulacao ou pressao local, cumprir regras de massagem quando indicadas e comparecer a consulta de retorno).
+
+5. PRIVACIDADE, LGPD E PROCESSAMENTO SEGURO DE DADOS
+Autorizo a captura e arquivamento seguro de fotografias de antes, durante e apos os procedimentos para fins exclusivos de prontuario clinico, documentacao medico-legal e acompanhamento evolutivo, em conformidade com a Lei Geral de Protecao de Dados (LGPD). Estou ciente de que ferramentas analiticas seguras de suporte inteligente sao empregadas sob sigilo profissional rigoroso.
+"""
+    pdf.set_font("Arial", size=8)
+    pdf.multi_cell(0, 3.7, txt=sanitizar_texto(texto_tcle))
+    
+    pdf.ln(6)
+    if pdf.get_y() > 240:
+        pdf.add_page()
+    y_ass = max(pdf.get_y() + 10, 248)
+    if y_ass > 268:
+        pdf.add_page()
+        y_ass = 40
+        
+    if caminho_assinatura_img and os.path.exists(caminho_assinatura_img):
+        try:
+            pdf.image(caminho_assinatura_img, x=130, y=y_ass - 16, w=50, h=15)
+        except Exception:
+            pass
+
+    pdf.set_font("Arial", 'B', 8)
+    pdf.line(15, y_ass, 95, y_ass)
+    pdf.line(115, y_ass, 195, y_ass)
+    pdf.set_xy(15, y_ass + 3)
+    pdf.cell(80, 4, txt=f"{nome_prof} ({reg_prof})", align='C')
+    pdf.set_xy(115, y_ass + 3)
+    pdf.cell(80, 4, txt=f"{nome_paciente} (Paciente)", align='C')
+    
+    saida = pdf.output(dest='S')
+    
+    if logo_temp and os.path.exists(logo_temp):
+        try:
+            os.remove(logo_temp)
+        except Exception:
+            pass
+
+    return saida.encode('latin-1') if isinstance(saida, str) else bytes(saida)
+
+# ================= 4. COMPRESSÃO DE IMAGENS E ARMAZENAMENTO =================
+def comprimir_imagem(imagem_bytes, max_dim=800, qualidade=80):
+    try:
+        img = Image.open(io.BytesIO(imagem_bytes))
+        if img.mode in ("RGBA", "LA", "P"):
+            fundo_branco = Image.new("RGB", img.size, (255, 255, 255))
+            fundo_branco.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+            img = fundo_branco
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+            
+        img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=qualidade, optimize=True)
+        return buffer.getvalue()
+    except Exception:
+        return imagem_bytes
+
+def salvar_fotos_storage(imagens_payload, prof_id, pac_id, pront_id):
+    urls_salvas = []
+    bucket_nome = "fotos-pacientes"
+    timestamp_atual = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    for idx, item in enumerate(imagens_payload):
+        try:
+            bytes_otimizados = comprimir_imagem(item["bytes"])
+            rotulo_limpo = item.get("rotulo", f"foto_{idx+1}").replace(" ", "_").replace("/", "-")
+            nome_arquivo = f"prof_{prof_id}/pac_{pac_id}/pront_{pront_id}/{timestamp_atual}_{rotulo_limpo}.jpg"
+            
+            supabase.storage.from_(bucket_nome).upload(
+                path=nome_arquivo,
+                file=bytes_otimizados,
+                file_options={"content-type": "image/jpeg", "upsert": "true"}
+            )
+            
+            url_publica = supabase.storage.from_(bucket_nome).get_public_url(nome_arquivo)
+            urls_salvas.append(url_publica)
+        except Exception as e:
+            st.warning(f"Aviso ao salvar foto {idx+1} no storage: {e}")
+            
+    return urls_salvas
+
+def salvar_pdfs_storage(pdf_plano_bytes, pdf_tcle_bytes, prof_id, pac_id, pront_id):
+    bucket_nome = "documentos-pacientes"
+    timestamp_atual = datetime.now().strftime("%Y%m%d_%H%M%S")
+    url_plano, url_tcle = None, None
+    
+    try:
+        nome_plano = f"prof_{prof_id}/pac_{pac_id}/pront_{pront_id}/Plano_{timestamp_atual}.pdf"
+        supabase.storage.from_(bucket_nome).upload(
+            path=nome_plano,
+            file=pdf_plano_bytes,
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+        url_plano = supabase.storage.from_(bucket_nome).get_public_url(nome_plano)
+    except Exception as e:
+        st.warning(f"Aviso ao salvar PDF do Plano no storage: {e}")
+
+    try:
+        nome_tcle = f"prof_{prof_id}/pac_{pac_id}/pront_{pront_id}/TCLE_{timestamp_atual}.pdf"
+        supabase.storage.from_(bucket_nome).upload(
+            path=nome_tcle,
+            file=pdf_tcle_bytes,
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+        url_tcle = supabase.storage.from_(bucket_nome).get_public_url(nome_tcle)
+    except Exception as e:
+        st.warning(f"Aviso ao salvar PDF do TCLE no storage: {e}")
+        
+    return url_plano, url_tcle
+
+def gerar_laudo_multimodal(prompt_texto, imagens_payload):
+    try:
+        client = anthropic.Anthropic(
+            api_key=ANTHROPIC_API_KEY.strip(),
+            timeout=140.0,
+            max_retries=2
+        )
+        
+        conteudo_mensagem = []
+        for item in imagens_payload:
+            bytes_jpeg = comprimir_imagem(item["bytes"])
+            dados_b64 = base64.b64encode(bytes_jpeg).decode("utf-8")
+            
+            rotulo = item.get("rotulo", "Foto Clínica")
+            conteudo_mensagem.append({
+                "type": "text",
+                "text": f"--- {rotulo} ---"
+            })
+            conteudo_mensagem.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": dados_b64
+                }
+            })
+            
+        conteudo_mensagem.append({
+            "type": "text",
+            "text": prompt_texto
+        })
+        
+        # Chamada estável sem parâmetro experimental quebrado
+        resposta = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=6000,
+            system="Voce e o Nexus Estetica. Responda imediatamente com precisao executiva, utilizando topicos diretos. E terminantemente proibido truncar ou interromper a conclusao de qualquer secao.",
+            messages=[{"role": "user", "content": conteudo_mensagem}]
+        )
+        
+        texto_final = []
+        for bloco in resposta.content:
+            if getattr(bloco, 'type', None) == 'text' and bloco.text:
+                texto_final.append(bloco.text)
+            elif hasattr(bloco, 'text') and bloco.text:
+                texto_final.append(bloco.text)
+            elif isinstance(bloco, dict) and bloco.get('type') == 'text':
+                texto_final.append(bloco.get('text', ''))
+                
+        resultado_str = "\n\n".join(texto_final).strip()
+        if resultado_str:
+            return resultado_str
+            
+        motivo = getattr(resposta, 'stop_reason', 'Desconhecido')
+        return f"Erro: Resposta vazia da API (Motivo: {motivo})"
+        
+    except anthropic.APIConnectionError as e:
+        return f"Erro de conexao com a Anthropic: {e}."
+    except anthropic.BadRequestError as e:
+        return f"Erro de requisicao na Anthropic (BadRequest): {e}."
+    except Exception as e:
+        return f"Erro inesperado na IA: {e}"
+
+# ================= 5. INGESTÃO RESUMIDA E ECONÔMICA DO STORAGE =================
+def carregar_conhecimento():
+    texto_base = ""
+    documentos_identificados = []
+    
+    try:
+        arquivos_bucket = supabase.storage.from_("documentos-estetica").list()
+        if arquivos_bucket and len(arquivos_bucket) > 0:
+            for item in arquivos_bucket:
+                nome_arq = item.get("name")
+                if nome_arq and nome_arq.endswith(".pdf"):
                     try:
-                        response = supabase.auth.sign_up({"email": email_novo, "password": senha_nova})
-                        if response.user:
-                            try:
-                                supabase.table("perfis_profissionais").insert({"id": response.user.id, "nome_completo": nome_completo}).execute()
-                            except Exception as db_err:
-                                pass
-                            st.success("✅ Conta criada com sucesso! Acesse a aba 'Entrar no Sistema'.")
-                    except Exception as e:
-                        st.error(f"Erro ao registrar: {str(e)}")
+                        arquivo_bytes = supabase.storage.from_("documentos-estetica").download(nome_arq)
+                        leitor = PyPDF2.PdfReader(io.BytesIO(arquivo_bytes))
+                        total_pags = len(leitor.pages)
+                        nome_lower = nome_arq.lower()
+                        txt = ""
                         
-        st.markdown("</div>", unsafe_allow_html=True)
+                        if "resolucao" in nome_lower or "cfbm" in nome_lower or "cfo" in nome_lower:
+                            for idx in range(min(2, total_pags)):
+                                t = leitor.pages[idx].extract_text()
+                                if t: txt += t + "\n"
+                        elif "bula" in nome_lower:
+                            pags_alvo = [0, 1, 2]
+                            for idx in pags_alvo:
+                                if idx < total_pags:
+                                    t = leitor.pages[idx].extract_text()
+                                    if t: txt += t + "\n"
+                        else:
+                            for idx in range(min(3, total_pags)):
+                                t = leitor.pages[idx].extract_text()
+                                if t: txt += t + "\n"
+                                
+                        if txt.strip():
+                            documentos_identificados.append(nome_arq)
+                            texto_base += f"\n[{nome_arq}]: " + txt[:2000].replace('\n', ' ') + "\n"
+                    except Exception:
+                        continue
+                        
+            if documentos_identificados:
+                return texto_base, f"{len(documentos_identificados)} diretrizes ativas via Supabase Storage (Otimizado).", documentos_identificados
+    except Exception:
+        pass
+
+    try:
+        for arquivo in sorted(os.listdir(".")):
+            if arquivo.endswith(".pdf") and not arquivo.startswith("Plano_") and not arquivo.startswith("Prontuario_") and not arquivo.startswith("TCLE_"):
+                documentos_identificados.append(arquivo)
+        if documentos_identificados:
+            return texto_base, f"{len(documentos_identificados)} documentos locais ativos.", documentos_identificados
+    except Exception:
+        pass
+        
+    return "", "Nenhum documento encontrado.", []
+
+# ================= 6. AUTENTICAÇÃO COM SESSÃO PERSISTENTE =================
+if not st.session_state.usuario_logado:
+    st.markdown("<h2 style='text-align: center; color: #2C3E50;'>✨ Nexus Estética - Acesso Profissional</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Ambiente de Prontuário Médico-Legal e Suporte à Decisão</p>", unsafe_allow_html=True)
+    
+    _, col_central, _ = st.columns([1, 2, 1])
+    with col_central:
+        aba_login, aba_registro = st.tabs(["🔑 Acessar Conta", "📝 Novo Cadastro Profissional"])
+        with aba_login:
+            email_login = st.text_input("E-mail Profissional", key="log_email")
+            senha_login = st.text_input("Senha", type="password", key="log_pass")
+            if st.button("ENTRAR NO SISTEMA", use_container_width=True, type="primary"):
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": email_login, "password": senha_login})
+                    st.session_state.usuario_logado = res.user
+                    perfil = supabase.table("profissionais").select("*").eq("id", res.user.id).execute()
+                    if perfil.data:
+                        st.session_state.perfil_profissional = perfil.data[0]
+                    st.query_params["user_id"] = res.user.id
+                    st.success("Acesso autorizado com sucesso!")
+                    st.rerun()
+                except Exception:
+                    st.error("Credenciais inválidas.")
+
+        with aba_registro:
+            nome_cad = st.text_input("Nome Completo", placeholder="Dr(a). Nome Sobrenome")
+            col_cad1, col_cad2 = st.columns(2)
+            with col_cad1:
+                conselho_cad = st.selectbox("Conselho Profissional", list(MAPA_CONSELHOS.keys()))
+            with col_cad2:
+                reg_cad = st.text_input("Nº Registro", placeholder="Ex: 12345/RJ")
+            email_cad = st.text_input("E-mail para Acesso", key="cad_email")
+            senha_cad = st.text_input("Definir Senha", type="password", key="cad_pass")
+            if st.button("CRIAR CONTA PROFISSIONAL", use_container_width=True):
+                if not nome_cad or not reg_cad or not email_cad or not senha_cad:
+                    st.error("Preencha todos os campos cadastrais.")
+                else:
+                    try:
+                        res = supabase.auth.sign_up({"email": email_cad, "password": senha_cad})
+                        supabase.table("profissionais").insert({
+                            "id": res.user.id,
+                            "nome": nome_cad,
+                            "conselho": conselho_cad,
+                            "registro": reg_cad,
+                            "email": email_cad,
+                            "limite_laudos_mes": 30,
+                            "laudos_gerados_mes": 0,
+                            "mes_referencia_cota": datetime.now().strftime("%Y-%m")
+                        }).execute()
+                        st.success("Conta criada! Faça login na aba ao lado.")
+                    except Exception as e:
+                        st.error(f"Erro ao criar conta: {e}")
     st.stop()
 
+# ================= 7. PAINEL PRINCIPAL & CONTROLE DE COTA =================
+prof = st.session_state.perfil_profissional
+prof_id = st.session_state.usuario_logado.id
+conselho_atual = prof.get('conselho', 'CRBM') if prof else 'CRBM'
+dados_conselho = MAPA_CONSELHOS.get(conselho_atual, MAPA_CONSELHOS['CRBM'])
 
-# ==========================================
-# CÓDIGO MESTRE: EXECUTA APENAS SE LOGADO
-# ==========================================
+# Lógica de Virada de Mês e Leitura de Cota
+mes_atual_str = datetime.now().strftime("%Y-%m")
+limite_laudos = prof.get("limite_laudos_mes", 30) or 30
+laudos_usados = prof.get("laudos_gerados_mes", 0) or 0
+mes_registrado = prof.get("mes_referencia_cota", mes_atual_str)
 
-# --- ISOLAMENTO DO BANCO DE DADOS (MULTI-TENANT) ---
-MEDICO_ID = st.session_state['usuario_logado'].id
-PASTA_BD = f"banco_pacientes_{MEDICO_ID}"
-os.makedirs(PASTA_BD, exist_ok=True)
+# Se mudou de mês, zera o contador no banco e na memória
+if mes_registrado != mes_atual_str:
+    try:
+        supabase.table("profissionais").update({
+            "laudos_gerados_mes": 0,
+            "mes_referencia_cota": mes_atual_str
+        }).eq("id", prof_id).execute()
+        laudos_usados = 0
+        prof["laudos_gerados_mes"] = 0
+        prof["mes_referencia_cota"] = mes_atual_str
+        st.session_state.perfil_profissional = prof
+    except Exception:
+        pass
 
-# --- CABEÇALHO SUPERIOR DE USUÁRIO ---
-col_head1, col_head2 = st.columns([4, 1])
-with col_head1:
-    email_logado = getattr(st.session_state['usuario_logado'], 'email', 'Médico Autenticado')
-    st.markdown(f"👨‍⚕️ **Profissional Logado:** <span style='color:#38bdf8;'>{email_logado}</span>", unsafe_allow_html=True)
-with col_head2:
-    if st.button("🚪 Sair da Plataforma", use_container_width=True):
-        if supabase: supabase.auth.sign_out()
-        st.session_state['usuario_logado'] = None
+cota_esgotada = (laudos_usados >= limite_laudos)
+saldo_restante = max(0, limite_laudos - laudos_usados)
+
+with st.sidebar:
+    if os.path.exists("logo.jpg"):
+        st.image("logo.jpg", use_container_width=True)
+    else:
+        st.markdown("### 💎 Nexus Estética")
+    
+    st.markdown(f"**Profissional:** {prof.get('nome') if prof else 'Conectado'}")
+    if prof:
+        st.caption(f"{conselho_atual}: {prof.get('registro')} ({dados_conselho['termo_profissional']})")
+
+    # ================= MONITOR DE ASSINATURA & COTA =================
+    with st.expander("📊 Plano & Cota de Laudos", expanded=True):
+        st.markdown(f"**Ciclo Atual:** `{mes_atual_str}`")
+        st.progress(min(1.0, laudos_usados / max(1, limite_laudos)))
+        st.caption(f"Utilizados: **{laudos_usados}** de **{limite_laudos}** laudos mensais.")
+        if cota_esgotada:
+            st.error("⚠️ Limite mensal atingido! Contate o suporte para upgrade de plano.")
+        else:
+            st.success(f"Disponíveis: **{saldo_restante}** avaliações neste mês.")
+    
+    # ================= GESTÃO DE LOGÓTIPO DA CLÍNICA =================
+    with st.expander("🏷️ Logotipo da Clínica / Consultório"):
+        logo_existente = prof.get("logo_url") if prof else None
+        if logo_existente:
+            st.image(logo_existente, caption="Marca Atual nos PDFs", use_container_width=True)
+            if st.button("Remover Logotipo Atual", use_container_width=True):
+                try:
+                    supabase.table("profissionais").update({"logo_url": None}).eq("id", prof_id).execute()
+                    prof["logo_url"] = None
+                    st.session_state.perfil_profissional = prof
+                    st.success("Logotipo removido com sucesso!")
+                    st.rerun()
+                except Exception as e_rem:
+                    st.error(f"Erro ao remover logo: {e_rem}")
+        
+        logo_upload = st.file_uploader("Carregar Logomarca (PNG ou JPG)", type=["png", "jpg", "jpeg"], key="up_logo_prof")
+        if logo_upload is not None:
+            if st.button("Salvar Logotipo no Perfil", use_container_width=True, type="primary"):
+                try:
+                    img_logo = Image.open(logo_upload)
+                    img_logo.thumbnail((400, 150), Image.Resampling.LANCZOS)
+                    buffer_logo = io.BytesIO()
+                    img_logo.save(buffer_logo, format="PNG")
+                    bytes_logo = buffer_logo.getvalue()
+
+                    caminho_logo_storage = f"logos/logo_{prof_id}.png"
+                    supabase.storage.from_("logos-profissionais").upload(
+                        path=caminho_logo_storage,
+                        file=bytes_logo,
+                        file_options={"content-type": "image/png", "upsert": "true"}
+                    )
+                    url_logo_pub = supabase.storage.from_("logos-profissionais").get_public_url(caminho_logo_storage)
+                    
+                    supabase.table("profissionais").update({"logo_url": url_logo_pub}).eq("id", prof_id).execute()
+                    prof["logo_url"] = url_logo_pub
+                    st.session_state.perfil_profissional = prof
+                    st.success("Logotipo salvo com sucesso! Ele aparecerá nos próximos laudos emitidos.")
+                    st.rerun()
+                except Exception as e_logo:
+                    st.error(f"Erro ao salvar logo: {e_logo}")
+
+    if st.button("Sair / Desconectar"):
+        st.session_state.usuario_logado = None
+        st.session_state.perfil_profissional = None
+        st.session_state.laudo_ativo = None
+        st.session_state.pdf_plano_bytes = None
+        st.session_state.pdf_tcle_bytes = None
+        st.session_state.ultimo_pront_id = None
+        st.session_state.ultimo_pac_id = None
+        if "user_id" in st.query_params:
+            del st.query_params["user_id"]
         st.rerun()
-st.markdown("---")
 
-# --- FUNÇÕES DE BANCO DE DADOS ---
-def salvar_exame(paciente, data_exame, dados_laudo, biometria=None):
-    caminho = os.path.join(PASTA_BD, f"{paciente}.json")
-    historico = []
-    if os.path.exists(caminho):
-        with open(caminho, 'r', encoding='utf-8') as f:
-            try: historico = json.load(f)
-            except json.JSONDecodeError: historico = []
-            
-    historico = [h for h in historico if h.get('data') != str(data_exame)]
-    
-    novo_registro = {"data": str(data_exame), "laudo": dados_laudo}
-    if biometria: novo_registro["biometria"] = biometria
-        
-    historico.append(novo_registro)
-    historico = sorted(historico, key=lambda x: x.get('data', ''))
-    
-    with open(caminho, 'w', encoding='utf-8') as f:
-        json.dump(historico, f, ensure_ascii=False, indent=4)
+    caminho_manual = "Manual_Usuario_Nexus_Estetica.pdf"
+    if os.path.exists(caminho_manual):
+        with open(caminho_manual, "rb") as f_manual:
+            bytes_manual = f_manual.read()
+        st.download_button(
+            label="📘 Baixar Manual do Usuário (PDF)",
+            data=bytes_manual,
+            file_name="Manual_Usuario_Nexus_Estetica.pdf",
+            mime="application/pdf",
+            help="Clique para descarregar o guia operacional rápido do Nexus Estética em PDF"
+        )
 
-def salvar_biometria_perfil(paciente, biometria):
-    caminho = os.path.join(PASTA_BD, f"{paciente}.json")
-    if os.path.exists(caminho):
-        with open(caminho, 'r', encoding='utf-8') as f:
-            try: historico = json.load(f)
-            except json.JSONDecodeError: historico = []
-        if historico:
-            historico[-1]["biometria"] = biometria
-            with open(caminho, 'w', encoding='utf-8') as f:
-                json.dump(historico, f, ensure_ascii=False, indent=4)
-            return True
-    return False
+    st.divider()
 
-def ler_biometria(paciente):
-    caminho = os.path.join(PASTA_BD, f"{paciente}.json")
-    if os.path.exists(caminho):
-        with open(caminho, 'r', encoding='utf-8') as f:
-            try:
-                historico = json.load(f)
-                if historico and len(historico) > 0 and 'biometria' in historico[-1]:
-                    return historico[-1]['biometria']
-            except json.JSONDecodeError: pass
-    return {"idade": 52, "sexo": "Masculino", "peso": 87.0, "objetivo": "Emagrecimento (Foco Clínico / Síndrome Metabólica)", "atividade": "Moderado (Musculação 3-4x)"}
+# ================= CABEÇALHO PRINCIPAL COM LOGO =================
+if os.path.exists("logo.jpg"):
+    col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
+    with col_l2:
+        st.image("logo.jpg", width=140)
 
-def extrair_valores_historico(historico):
-    dados_grafico = []
-    for reg in historico:
-        data_ex = reg.get('data')
-        if not data_ex: continue
-        laudo = reg.get('laudo', {})
-        glicose = insulina = hb_glicada = colesterol_total = ldl = hdl = triglicerideos = testosterona = cortisol = tsh = None
-        
-        for achado in laudo.get('achados', []):
-            nome = str(achado.get('marcador', '')).lower()
-            valor_str = str(achado.get('valor_encontrado', '')).strip()
-            if ',' in valor_str: valor_str = valor_str.replace('.', '').replace(',', '.')
-            try:
-                match = re.search(r"[-+]?\d*\.\d+|\d+", valor_str)
-                if match:
-                    val = float(match.group())
-                    if 'glicose' in nome or 'glicemia' in nome: glicose = val
-                    elif 'insulina' in nome: insulina = val
-                    elif 'hemoglobina glicada' in nome or 'hba1c' in nome or 'glicada' in nome: hb_glicada = val
-                    elif 'triglicerídeos' in nome or 'triglicerideos' in nome: triglicerideos = val
-                    elif 'hdl' in nome: hdl = val
-                    elif 'ldl' in nome: ldl = val
-                    elif 'colesterol total' in nome or ('colesterol' in nome and 'total' in nome): colesterol_total = val
-                    elif 'testosterona' in nome and 'livre' not in nome: testosterona = val
-                    elif 'cortisol' in nome: cortisol = val
-                    elif 'tsh' in nome: tsh = val
-            except: continue
-        
-        homa_ir = (glicose * insulina) / 405 if glicose is not None and insulina is not None else None
-        linha = {"Data": data_ex}
-        if glicose is not None: linha["Glicemia"] = glicose
-        if hb_glicada is not None: linha["HbA1c"] = hb_glicada
-        if homa_ir is not None: linha["HOMA-IR"] = round(homa_ir, 2)
-        if colesterol_total is not None: linha["Colesterol Total"] = colesterol_total
-        if ldl is not None: linha["LDL"] = ldl
-        if hdl is not None: linha["HDL"] = hdl
-        if triglicerideos is not None: linha["Triglicerídeos"] = triglicerideos
-        if testosterona is not None: linha["Testosterona Total"] = testosterona
-        if cortisol is not None: linha["Cortisol"] = cortisol
-        if tsh is not None: linha["TSH"] = tsh
-        dados_grafico.append(linha)
-    return dados_grafico
-
-def extrair_texto_pdf(arquivo_pdf):
-    if not arquivo_pdf: return ""
-    leitor = PyPDF2.PdfReader(arquivo_pdf)
-    texto = ""
-    for pagina in leitor.pages: 
-        texto += pagina.extract_text() + "\n"
-    return texto
-
-def calcular_indices(dados_json):
-    glicose = insulina = hdl = triglicerideos = None
-    for achado in dados_json.get('achados', []):
-        nome = achado.get('marcador', '').lower()
-        try:
-            val_str = str(achado.get('valor_encontrado', '')).replace(',', '.')
-            match = re.search(r"[-+]?\d*\.\d+|\d+", val_str)
-            if match:
-                val = float(match.group())
-                if 'glicose' in nome or 'glicemia' in nome: glicose = val
-                elif 'insulina' in nome: insulina = val
-                elif 'hdl' in nome: hdl = val
-                elif 'triglicerídeos' in nome or 'triglicerideos' in nome: triglicerideos = val
-        except: continue
-    calculos = {}
-    if glicose and insulina:
-        homa_ir = (glicose * insulina) / 405
-        status_homa = "Resistência à Insulina" if homa_ir >= 2.5 else "HOMA-IR Normal"
-        cor_homa = "#dc2626" if homa_ir >= 2.5 else "#16a34a"
-        calculos['HOMA-IR'] = f"<p><strong>Índice HOMA-IR:</strong> {homa_ir:.2f} - <span style='color: {cor_homa}; font-weight: bold;'>{status_homa}</span></p>"
-    if triglicerideos and hdl:
-        relacao = triglicerideos / hdl
-        status_rel = "Risco Aterogênico Elevado" if relacao >= 3.5 else "Controlado"
-        cor_rel = "#dc2626" if relacao >= 3.5 else "#16a34a"
-        calculos['Trig/HDL'] = f"<p><strong>Relação Trig/HDL:</strong> {relacao:.2f} - <span style='color: {cor_rel}; font-weight: bold;'>{status_rel}</span></p>"
-    return "".join(calculos.values())
-
-def baixar_html(html_string, nome_arquivo):
-    b64 = base64.b64encode(html_string.encode()).decode()
-    return f'<br><a href="data:text/html;base64,{b64}" download="{nome_arquivo}.html" class="stButton" style="text-decoration:none; display:inline-block; padding:12px 24px; background:linear-gradient(145deg, #0284c7, #0369a1); color:white; border-radius:10px; font-weight:bold; box-shadow: 4px 4px 10px rgba(0,0,0,0.5);">📥 Baixar Dossiê (HTML)</a>'
-
-def gerar_html_cardapio(paciente, cardapio_md):
-    import re
-    html_cardapio = cardapio_md.replace('\n', '<br>')
-    html_cardapio = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', html_cardapio)
-    html_cardapio = re.sub(r'\*(.*?)\*', r'<i>\1</i>', html_cardapio)
-    html_cardapio = re.sub(r'### (.*?)<br>', r'<h3>\1</h3>', html_cardapio)
-    html_cardapio = re.sub(r'## (.*?)<br>', r'<h2>\1</h2>', html_cardapio)
-    
-    html = f"""
-    <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Cardápio - {paciente}</title>
-    <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }}</style>
-    </head><body>
-    <h1 style="text-align:center;color:#1e3a8a;">Prescrição Dietética Semanal</h1>
-    <h3 style="text-align:center;">Paciente: {paciente}</h3>
-    <hr>
-    <div>{html_cardapio}</div>
-    </body></html>
-    """
-    return html    
-
-def gerar_html_evolucao(paciente, parecer_md):
-    html_content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', parecer_md)
-    html_content = re.sub(r'### (.*)', r'<h3>\1</h3>', html_content)
-    html_content = re.sub(r'## (.*)', r'<h2>\1</h2>', html_content)
-    html_content = re.sub(r'# (.*)', r'<h1>\1</h1>', html_content)
-    html_content = html_content.replace('\n', '<br>')
-    
-    html = f"""
-    <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Evolução Clínica - {paciente}</title>
-    <style>
-        body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }}
-        .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }}
-        .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }}
-        .content {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 25px; border-radius: 8px; white-space: pre-wrap; font-size: 1.05em; }}
-        .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}
-    </style>
-    </head><body>
-        <div class="header">
-            <h1>Dossiê de Evolução Clínica</h1>
-            <h3>Acompanhamento Longitudinal e Avaliação de Progresso</h3>
-        </div>
-        <p><strong>Paciente:</strong> {paciente}</p>
-        <p><strong>Data da Análise:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
-        <div class="content">{html_content}</div>
-        <div class="footer">Gerado por Nexus Clínico - Motor de Inteligência Artificial para Alta Performance.</div>
-    </body></html>
-    """
-    return html
-
-def gerar_html_laudo(paciente, data, modulo, dados_json, calculos_html):
-    linhas_tabela = ""
-    for achado in dados_json.get('achados', []):
-        marcador = achado.get('marcador', '')
-        resultado = achado.get('valor_encontrado', '')
-        referencia = achado.get('valor_referencia', '')
-        analise = achado.get('analise_fisiologica', '')
-        status = achado.get('status', '').lower()
-
-        if 'otimizado' in status: cor, icone, texto_status = '#16a34a', "🟢", "Otimizado"
-        elif 'alerta' in status: cor, icone, texto_status = '#d97706', "🟡", "Alerta Metabólico"
-        elif 'risco' in status or 'alterado' in status: cor, icone, texto_status = '#dc2626', "🔴", "Risco Clínico"
-        else: cor, icone, texto_status = '#16a34a', ("🟢" if 'normal' in status else "🔸"), status.title()
-
-        valor_formatado = f"<td style='color: {cor}; font-weight:bold;'>{icone} {resultado} <br><span style='font-size: 0.8em; color: {cor};'>{texto_status}</span></td>"
-        linhas_tabela += f"<tr><td>{marcador}</td>{valor_formatado}<td>{referencia}</td><td>{analise}</td></tr>"
-
-    html_calculos = f"<h2>🧮 Calculadoras de Risco</h2><div style='background-color: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e2e8f0;'>{calculos_html}</div>" if calculos_html else ""
-
-    modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
-    
-    if modulo in modulos_avancados:
-        alertas = "".join([f"<li>{a}</li>" for a in dados_json.get('alertas_vermelhos', [])])
-        caixa_alertas = f"<div class='alert-box'><ul>{alertas}</ul></div>" if alertas else ""
-        alertas_inbody = "".join([f"<li>{a}</li>" for a in dados_json.get('alertas_composicao', [])])
-        caixa_inbody = f"<div class='alert-box' style='background-color: #fffbeb; border-color: #f59e0b; color: #b45309;'><strong>⚖️ Alertas de Composição Corporal:</strong><br><ul>{alertas_inbody}</ul></div>" if alertas_inbody else ""
-        
-        macros = dados_json.get('estrategia_nutricional', {})
-        html_macros = ""
-        if isinstance(macros, dict) and macros.get('macros'):
-            html_macros = f"""
-            <div class="insight-box" style="border-left-color: #f59e0b; background-color: #fffbeb;">
-                <strong>🍽️ Estratégia de Macronutrientes (Meta):</strong><br>
-                Calorias Alvo: {macros.get('calorias_alvo', '')}<br>
-                Proteínas: {macros.get('macros', {}).get('proteinas', '')}<br>
-                Carboidratos: {macros.get('macros', {}).get('carboidratos', '')}<br>
-                Gorduras: {macros.get('macros', {}).get('gorduras', '')}<br>
-                <em>Justificativa: {macros.get('justificativa_clinica', '')}</em>
-            </div>
-            """
-
-        titulo_modulo = "DOSSIÊ CLÍNICO DE ALTA PERFORMANCE" if "Performance" in modulo else "DOSSIÊ CLÍNICO E METABÓLICO"
-
-        html = f"""
-        <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Dossiê - {paciente}</title>
-        <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .alert-box {{ background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; }} .eixo-box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 15px; }} .insight-box {{ background-color: #f0fdf4; border-left: 5px solid #22c55e; padding: 15px; margin-bottom: 15px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95em; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }} th, td {{ padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
-        </head><body>
-        <div class="header"><h1>{titulo_modulo}</h1><h3>Avaliação Fisiológica Integrada</h3></div>
-        <p><strong>Paciente:</strong> {paciente} | <strong>Data:</strong> {data}</p>
-        <h2>📊 Resumo Executivo</h2><p>{dados_json.get('resumo_executivo', '')}</p>
-        {f"<h2>🚨 Alertas Críticos</h2>{caixa_alertas}" if alertas else ""}
-        {caixa_inbody}
-        <h2>🧬 Análise Metabólica Cruzada</h2>
-        <div class="eixo-box"><strong>Eixo Glicêmico / Captação de Nutrientes:</strong><br>{dados_json.get('eixo_glicemico', '')}</div>
-        <div class="eixo-box"><strong>Eixo Hormonal / Anabolismo:</strong><br>{dados_json.get('eixo_hormonal', '')}</div>
-        <div class="eixo-box"><strong>Eixo Inflamatório, Lipídico e Dano Muscular:</strong><br>{dados_json.get('eixo_inflamatorio', '')}</div>
-        <h2>🎯 Insights para Conduta</h2>
-        <div class="insight-box"><strong>Foco Médico / Estratégia Endócrina:</strong><br>{dados_json.get('insight_medico', '')}</div>
-        <div class="insight-box"><strong>Foco Nutricional / Suplementação Ergogênica:</strong><br>{dados_json.get('insight_nutricional', '')}</div>
-        {html_macros}
-        {html_calculos}
-        <h2>🔬 Marcadores Clínicos em Destaque (Alterações e Alvos)</h2>
-        <table><tr><th>Marcador</th><th>Resultado / Status</th><th>Referência do Laboratório</th><th>Análise Fisiológica</th></tr>{linhas_tabela}</table>
-        <div class="footer">Gerado por Nexus Clínico - Suporte à Decisão de Alta Performance.</div></body></html>
-        """
-        return html
-    elif modulo == "Microbiologia (Cultura e Antibiograma)":
-        bacterias = "".join([f"<li>{b}</li>" for b in dados_json.get('bacterias_isoladas', [])])
-        caixa_bacterias = f"<div class='alert-box'><strong>🔬 Microrganismos Isolados:</strong><ul>{bacterias}</ul></div>" if bacterias else "<div class='insight-box'><strong>🔬 Cultura Negativa / Flora Normal</strong></div>"
-        
-        sensiveis = "<br>".join([f"✅ {s}" for s in dados_json.get('antibioticos_sensiveis', [])])
-        resistentes = "<br>".join([f"❌ {r}" for s in dados_json.get('antibioticos_resistentes', [])])
-        
-        html = f"""
-        <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo - {paciente}</title>
-        <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .alert-box {{ background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; }} .eixo-box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 15px; }} .insight-box {{ background-color: #f0fdf4; border-left: 5px solid #22c55e; padding: 15px; margin-bottom: 15px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95em; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }} th, td {{ padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
-        </head><body>
-        <div class="header"><h1>LAUDO MICROBIOLÓGICO E INFECCIOSO</h1><h3>Avaliação de Cultura e Antibiograma</h3></div>
-        <p><strong>Paciente:</strong> {paciente} | <strong>Data:</strong> {data}</p>
-        <h2>📋 Resumo Clínico</h2><p>{dados_json.get('resumo_clinico', '')}</p>
-        {caixa_bacterias}
-        <h2>💊 Perfil de Sensibilidade Antimicrobiana</h2>
-        <div style="display: flex; gap: 20px;">
-            <div class="eixo-box" style="flex: 1;"><strong>Antibiograma (Sensível):</strong><br>{sensiveis}</div>
-            <div class="eixo-box" style="flex: 1; border-color: #ef4444; background-color: #fef2f2;"><strong>Antibiograma (Resistente):</strong><br>{resistentes}</div>
-        </div>
-        <h2>🩺 Diretriz Terapêutica</h2>
-        <div class="insight-box" style="border-color: #f59e0b; background-color: #fffbeb;"><strong>Conduta Infecciosa:</strong><br>{dados_json.get('conduta_infecciosa', '')}</div>
-        <h2>🔬 Detalhamento</h2>
-        <table><tr><th>Marcador</th><th>Resultado / Status</th><th>Referência</th><th>Análise Técnica</th></tr>{linhas_tabela}</table>
-        <div class="footer">Gerado por Nexus Clínico - Suporte à Decisão Médica.</div></body></html>
-        """
-        return html
-    else:
-        html = f"""
-        <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo Clínico</title>
-        <style>body {{ font-family: sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }} th, td {{ padding: 10px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }} th {{ background-color: #1e293b; color: white; }}</style>
-        </head><body><h1 style="text-align: center; color: #1e3a8a;">LAUDO CLÍNICO ESPECIALIZADO</h1><p><strong>Paciente:</strong> {paciente} | <strong>Data:</strong> {data} | <strong>Módulo:</strong> {modulo}</p>
-        <h3>Resumo Clínico</h3><p>{dados_json.get('resumo_clinico', '')}</p>{html_calculos}
-        <h3>Detalhamento (Marcadores)</h3><table><tr><th>Marcador</th><th>Resultado / Status</th><th>Referência Laboratorial</th><th>Análise</th></tr>{linhas_tabela}</table>
-        {f"<h3>Radar Científico</h3><p>{dados_json.get('radar_cientifico', '')}</p>" if dados_json.get('radar_cientifico') else ""}
-        </body></html>
-        """
-        return html
-
-# --- GESTÃO NO MENU LATERAL ---
-st.sidebar.title("👥 Gestão de Pacientes")
-
-# BLINDAGEM 1: Ocultar arquivos de cardápio da lista de pacientes
-pacientes_salvos = [f.replace('.json', '') for f in os.listdir(PASTA_BD) if f.endswith('.json') and not f.endswith('_cardapio.json')]
-
-opcao_paciente = st.sidebar.radio("Ação:", ["Selecionar Existente", "Novo Paciente"])
-
-paciente_ativo = ""
-if opcao_paciente == "Novo Paciente":
-    paciente_ativo = st.sidebar.text_input("Nome Completo:")
-    if st.sidebar.button("Limpar Tela para Novo"): st.rerun()
+st.title("✨ Nexus Estética - Suporte à Decisão Clínica")
+conhecimento_atual, msg_status, lista_docs = carregar_conhecimento()
+if conhecimento_atual == "":
+    st.warning("⚠️ Nenhuma diretriz encontrada.")
 else:
-    if pacientes_salvos:
-        paciente_ativo = st.sidebar.selectbox("Escolha o Paciente:", pacientes_salvos)
+    st.success(f"✅ {msg_status}")
+    with st.expander("📚 Acervo Técnico e Regulatório Indexado"):
+        for doc in lista_docs:
+            st.markdown(f"- 📄 `{doc}`")
+
+# ================= 8. GESTÃO DE PACIENTES E ANAMNESE EXPANDIDA =================
+with st.sidebar:
+    st.header("📋 Anamnese e Queixa do Paciente")
+    modo_atendimento = st.radio("Tipo de Atendimento", ["Novo Paciente", "Consulta de Retorno"])
+    
+    paciente_selecionado = None
+    prontuario_referencia = None
+    
+    if modo_atendimento == "Consulta de Retorno":
+        pacientes_res = supabase.table("pacientes").select("*").eq("profissional_id", prof_id).order("nome").execute()
+        lista_pacientes = pacientes_res.data
+        if lista_pacientes:
+            opcoes_pacientes = {p['nome']: p for p in lista_pacientes}
+            escolha = st.selectbox("Selecione o Paciente Cadastrado", list(opcoes_pacientes.keys()))
+            paciente_selecionado = opcoes_pacientes[escolha]
+            
+            historico = supabase.table("prontuarios").select("*").eq("paciente_id", paciente_selecionado['id']).order("data_atendimento", desc=True).execute()
+            prontuarios_historico = historico.data
+            
+            if prontuarios_historico:
+                st.caption(f"Total de consultas registradas: {len(prontuarios_historico)}")
+                opcoes_consultas = {
+                    f"{p['data_atendimento'][:10]} - {p.get('procedimento', 'Avaliação')}": p 
+                    for p in prontuarios_historico
+                }
+                escolha_consulta = st.selectbox("Prontuário de Referência (Histórico)", list(opcoes_consultas.keys()))
+                prontuario_referencia = opcoes_consultas[escolha_consulta]
+            else:
+                st.info("Paciente sem consultas anteriores registradas.")
+        else:
+            st.warning("Nenhum paciente cadastrado.")
+
+    nome_padrao = paciente_selecionado['nome'] if paciente_selecionado else ""
+    idade_padrao = int(paciente_selecionado['idade']) if paciente_selecionado else 55
+    genero_padrao = paciente_selecionado.get('genero', 'Feminino') if paciente_selecionado else "Feminino"
+    
+    nome = st.text_input("Nome do Paciente", value=nome_padrao, placeholder="Ex: Claudia Rosa")
+    col1, col2 = st.columns(2)
+    with col1:
+        idade = st.number_input("Idade", min_value=18, max_value=100, value=idade_padrao)
+    with col2:
+        idx_gen = ["Feminino", "Masculino", "Outro"].index(genero_padrao) if genero_padrao in ["Feminino", "Masculino", "Outro"] else 0
+        genero = st.selectbox("Gênero", ["Feminino", "Masculino", "Outro"], index=idx_gen)
+        
+    queixa_default = "Consulta de retorno: avaliar resposta biológica tecidual, simetria muscular e planejar próximas condutas." if modo_atendimento == "Consulta de Retorno" else "Queixa de olhar cansado, rugas na testa, bigode chinês e sensação de peso no terço inferior (jowls)."
+    queixa = st.text_area("Queixa Principal / Motivo da Consulta", value=queixa_default)
+    
+    foco_avaliacao = st.selectbox("Escopo da Avaliação Clínica", [
+        "Consulta de Retorno / Ajuste e Segunda Sessão",
+        "Avaliação Facial Global (Indicação Livre de Condutas)",
+        "Foco em Terço Superior (Olhar, Glabela e Fronte)",
+        "Foco em Sustentação e Vetores (Terço Médio, Jowls e Mento)",
+        "Foco em Contorno Mandibular e Submento (Papada / Gordura)",
+        "Foco em Biorregeneração, Qualidade de Pele e Flacidez"
+    ])
+    
+    # ================= ANAMNESE ESTRUTURADA EM 5 BLOCOS CLÍNICOS =================
+    with st.expander("☀️ 1. Hábitos e Estilo de Vida", expanded=False):
+        rotina_sol = st.selectbox("Exposição Solar", ["Baixa (< 30 min)", "Moderada (30m a 2h)", "Alta (> 2h)"])
+        usa_fps = st.checkbox("Usa protetor solar diariamente", value=True)
+        tabagismo = st.checkbox("Tabagista ativo")
+        etilismo = st.checkbox("Consumo frequente de álcool")
+        atividade_intensa = st.checkbox("Pratica musculação / treino intenso (alta demanda metabólica)")
+
+    with st.expander("🛡️ 2. Segurança Sistêmica & Metabolismo", expanded=False):
+        gestante_lactante = st.checkbox("Gestante ou Lactante")
+        doenca_neuromuscular = st.checkbox("Doença Neuromuscular (Miastenia gravis, Eaton-Lambert)")
+        doenca_autoimune = st.checkbox("Doença Autoimune Ativa (Lúpus, Artrite, Psoríase)")
+        diabetes_descompensada = st.checkbox("Diabetes Mellitus descompensada")
+        tireoide_descompensada = st.checkbox("Disfunção tireoidiana descompensada (Hipotireoidismo/Hashimoto)")
+        infeccao_local = st.checkbox("Lesão inflamatória / Infecção ativa na face")
+
+    with st.expander("💊 3. Farmacologia, Medicamentos & Alergias", expanded=False):
+        alergia_ovo_leite = st.checkbox("Alergia a Albumina Humana ou Caseína")
+        alergia_anestesicos = st.checkbox("Alergia a Lidocaína ou Anestésicos Locais")
+        alergia_medicamentos = st.checkbox("Alergia medicamentosa (AINEs, Dipirona, Antibióticos)")
+        roacutan_recente = st.checkbox("Uso de Isotretinoína oral (Roacutan) nos últimos 12 meses")
+        corticoide_imuno = st.checkbox("Uso contínuo de Corticosteroides ou Imunossupressores")
+        uso_aminoglicosideos = st.checkbox("Uso de Aminoglicosídeos ou Relaxantes Musculares")
+
+    with st.expander("🩸 4. Coagulação, Risco Vascular & Cicatrização", expanded=False):
+        uso_aas = st.checkbox("Uso de AAS, Anticoagulantes ou Antiagregantes (NOACs, Ginkgo)")
+        historico_ptose = st.checkbox("Histórico de ptose palpebral prévia pós-toxina")
+        historico_herpes = st.checkbox("Histórico de Herpes Simples Labial/Facial recorrente")
+        tendencia_queloide = st.checkbox("Tendência a queloide ou cicatriz hipertrófica")
+        cirurgia_facial_previa = st.checkbox("Cirurgia facial prévia (Rinoplastia, Blefaroplastia, Lifting)")
+
+    with st.expander("💉 5. Passado Estético & Presença de Polímeros", expanded=False):
+        ja_fez_toxina = st.checkbox("Já aplicou Toxina anteriormente", value=True if modo_atendimento == "Consulta de Retorno" else False)
+        meses_ultima_toxina = 1 if modo_atendimento == "Consulta de Retorno" else 12
+        if ja_fez_toxina:
+            meses_ultima_toxina = st.number_input("Meses desde a última aplicação de toxina", min_value=0, max_value=60, value=meses_ultima_toxina)
+        preenchedor_previo = st.checkbox("Possui preenchedor absorvível prévio (Ácido Hialurônico)")
+        bioestimulador_previo = st.checkbox("Já realizou Bioestimulador de Colágeno (PLLA, CaHA ou Fios)")
+        polimero_definitivo = st.checkbox("⚠️ Presença de Material Definitivo (PMMA, Silicone, Metacrilato)")
+        intercorrencia_previa = st.checkbox("Histórico de necrose vascular, nódulo inflamatório ou granuloma")
+
+    st.divider()
+    rotulo_botao = "GERAR PLANO DE RETORNO E EVOLUÇÃO" if modo_atendimento == "Consulta de Retorno" else "DIAGNOSTICAR E PLANEJAR TRATAMENTO"
+    gerar = st.button(rotulo_botao, type="primary", disabled=cota_esgotada)
+    if cota_esgotada:
+        st.sidebar.error("❌ Emissão bloqueada: cota de laudos esgotada neste ciclo.")
+
+# ================= 9. ABA DE HISTÓRICO VISUAL (RETORNO) =================
+if modo_atendimento == "Consulta de Retorno" and prontuario_referencia:
+    with st.expander(f"📁 Histórico Clínico Selecionado ({prontuario_referencia['data_atendimento'][:10]} - {prontuario_referencia.get('procedimento', '')})", expanded=True):
+        col_hist1, col_hist2 = st.columns([1, 1])
+        with col_hist1:
+            st.markdown("**Documentos da Consulta Anterior:**")
+            if prontuario_referencia.get("pdf_plano_url"):
+                st.markdown(f"📄 [Baixar Plano de Tratamento Anterior]({prontuario_referencia['pdf_plano_url']})")
+            if prontuario_referencia.get("pdf_tcle_url"):
+                st.markdown(f"📝 [Baixar TCLE Anterior]({prontuario_referencia['pdf_tcle_url']})")
+            if not prontuario_referencia.get("pdf_plano_url") and not prontuario_referencia.get("pdf_tcle_url"):
+                st.caption("PDFs arquivados no banco de dados para esta consulta.")
+                
+        with col_hist2:
+            st.markdown("**Conduta Registrada no Parecer Anterior:**")
+            texto_resumido = prontuario_referencia.get("laudo_texto", "")
+            if len(texto_resumido) > 400:
+                st.caption(texto_resumido[:400] + "...")
+            else:
+                st.caption(texto_resumido)
+                
+        fotos_anteriores = prontuario_referencia.get("fotos_urls")
+        if fotos_anteriores and isinstance(fotos_anteriores, list):
+            st.markdown("**Fotos de Base da Consulta Anterior:**")
+            col_f_ant = st.columns(min(len(fotos_anteriores), 4))
+            for i_foto, url_f in enumerate(fotos_anteriores):
+                with col_f_ant[i_foto % 4]:
+                    st.image(url_f, caption=f"Anterior {i_foto+1}", use_container_width=True)
+
+# ================= 10. ENTRADA MULTIMODAL ATUAL (PADRONIZADA POR MÍMICA + PERFIS OPCIONAIS) =================
+st.subheader("📷 Protocolo Fotográfico Clínico Padronizado")
+st.caption("Organize as fotografias de acordo com as expressões para evitar diagnósticos falsos de mímica forçada.")
+
+col_upload1, col_upload2 = st.columns(2)
+
+with col_upload1:
+    foto_repouso = st.file_uploader(
+        "1. Face Frontal - REPOUSO (Mandatória)",
+        type=["jpg", "jpeg", "png"],
+        key="f_repouso",
+        help="Rosto totalmente relaxado, sem expressões, lábios selados e olhar no horizonte."
+    )
+    foto_glabela = st.file_uploader(
+        "3. Dinâmica - GLABELA / BRAVO",
+        type=["jpg", "jpeg", "png"],
+        key="f_glabela",
+        help="Solicite ao paciente que aproxime as sobrancelhas com força (expressão de bravo)."
+    )
+
+with col_upload2:
+    foto_frontal = st.file_uploader(
+        "2. Dinâmica - MÚSCULO FRONTAL / TESTA",
+        type=["jpg", "jpeg", "png"],
+        key="f_frontal",
+        help="Solicite ao paciente que levante as sobrancelhas ao máximo (expressão de surpresa)."
+    )
+    foto_sorriso = st.file_uploader(
+        "4. Dinâmica - SORRISO FORÇADO",
+        type=["jpg", "jpeg", "png"],
+        key="f_sorriso",
+        help="Sorriso aberto e forçado para evidenciar o músculo orbicular dos olhos (pés de galinha)."
+    )
+
+with st.expander("📐 Fotografias Complementares de Contorno (Opcional - Perfil e Oblíquas)"):
+    st.caption("Ângulos para refinamento de linha de mandíbula, sulco nasogeniano, queixo e projeção malar.")
+    col_lat1, col_lat2 = st.columns(2)
+    with col_lat1:
+        foto_perfil_dir = st.file_uploader("Perfil Direito (90°)", type=["jpg", "jpeg", "png"], key="f_p_dir")
+        foto_obliqua_dir = st.file_uploader("Oblíqua Direita (45°)", type=["jpg", "jpeg", "png"], key="f_o_dir")
+    with col_lat2:
+        foto_perfil_esq = st.file_uploader("Perfil Esquerdo (90°)", type=["jpg", "jpeg", "png"], key="f_p_esq")
+        foto_obliqua_esq = st.file_uploader("Oblíqua Esquerda (45°)", type=["jpg", "jpeg", "png"], key="f_o_esq")
+
+imagens_payload = []
+mapa_fotos = [
+    ("FOTO 1: FACE FRONTAL EM REPOUSO", foto_repouso),
+    ("FOTO 2: DINAMICA FRONTAL (TESTA ELEVADA)", foto_frontal),
+    ("FOTO 3: DINAMICA GLABELA (FRANZIR)", foto_glabela),
+    ("FOTO 4: DINAMICA SORRISO (PERIORBICULAR)", foto_sorriso),
+    ("FOTO 5: PERFIL DIREITO (90 GRAUS)", foto_perfil_dir),
+    ("FOTO 6: PERFIL ESQUERDO (90 GRAUS)", foto_perfil_esq),
+    ("FOTO 7: OBLIQUA DIREITA (45 GRAUS)", foto_obliqua_dir),
+    ("FOTO 8: OBLIQUA ESQUERDA (45 GRAUS)", foto_obliqua_esq)
+]
+
+fotos_ativas = [(rotulo, f) for rotulo, f in mapa_fotos if f is not None]
+if fotos_ativas:
+    cols_prev = st.columns(min(len(fotos_ativas), 4))
+    for idx, (rotulo, arq) in enumerate(fotos_ativas):
+        with cols_prev[idx % 4]:
+            st.image(arq, caption=rotulo, use_container_width=True)
+            imagens_payload.append({
+                "tipo": arq.type,
+                "bytes": arq.getvalue(),
+                "rotulo": rotulo
+            })
+
+# ================= 11. PROCESSAMENTO MULTI-CONSELHO =================
+if gerar and conhecimento_atual:
+    if cota_esgotada:
+        st.error("Sua cota mensal de avaliações foi esgotada.")
+    elif not nome:
+        st.sidebar.error("Preencha o nome do paciente.")
+    elif not foto_repouso:
+        st.sidebar.error("A Foto 1 (Face Frontal em Repouso) é obrigatória para definir os parâmetros basais.")
     else:
-        st.sidebar.warning("Nenhum paciente cadastrado.")
-
-# ZONA DE PERIGO
-if paciente_ativo and opcao_paciente == "Selecionar Existente":
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### ⚙️ Gestão de Dados")
-    with st.sidebar.expander("⚠️ Zona de Perigo"):
-        caminho_arquivo = os.path.join(PASTA_BD, f"{paciente_ativo}.json")
-        if os.path.exists(caminho_arquivo):
-            with open(caminho_arquivo, 'r', encoding='utf-8') as f:
-                try: hist_temp = json.load(f)
-                except: hist_temp = []
-                
-            # BLINDAGEM 2: Só procurar exames se o arquivo for realmente uma lista de histórico
-            if isinstance(hist_temp, list) and len(hist_temp) > 0:
-                st.markdown("**Apagar um Exame Específico:**")
-                datas_exames = [h.get('data') for h in hist_temp if isinstance(h, dict) and h.get('data')]
-                
-                if datas_exames:
-                    data_apagar = st.selectbox("Selecione a data:", datas_exames)
-                    if st.button("🗑️ Excluir Exame", key="btn_excluir_exame"):
-                        hist_novo = [h for h in hist_temp if isinstance(h, dict) and h.get('data') != data_apagar]
-                        with open(caminho_arquivo, 'w', encoding='utf-8') as f: 
-                            json.dump(hist_novo, f, ensure_ascii=False, indent=4)
-                        st.sidebar.success(f"Exame de {data_apagar} removido do histórico!")
-                        st.rerun()
-        
-        st.markdown("---")
-        st.markdown("**Apagar Paciente:**")
-        st.caption("Esta ação apagará todo o histórico e laudos deste paciente. Não há como reverter.")
-        if st.button("🚨 Excluir Paciente", key="btn_excluir_paciente"):
-            # Apaga o exame do paciente
-            if os.path.exists(caminho_arquivo): os.remove(caminho_arquivo)
-            # Apaga o cardápio do paciente junto
-            caminho_cardapio_del = os.path.join(PASTA_BD, f"{paciente_ativo}_cardapio.json")
-            if os.path.exists(caminho_cardapio_del): os.remove(caminho_cardapio_del)
-            
-            st.sidebar.success(f"Paciente {paciente_ativo} excluído!")
-            st.rerun()
-
-st.title("🧬 Nexus Clínico | Copiloto Médico")
-
-# --- CONSTRUÇÃO DAS ABAS PRINCIPAIS ---
-if not paciente_ativo:
-    st.info("👈 Por favor, crie um Novo Paciente ou selecione um existente no menu lateral para iniciar.")
-else:
-    st.markdown(f"**Paciente Ativo:** `{paciente_ativo}`")
-    aba_dashboard, aba_analise, aba_familia, aba_taco, aba_cardapio, aba_microscopia = st.tabs(["📊 Dashboard & Evolução", "🔬 Nova Análise Laboratorial", "👨‍👩‍👧‍👦 Sincronização Familiar", "🍎 Consulta TACO", "🍽️ Prescrição de Cardápio", "🧫 Microscopia Avançada"])
-
-    # ==========================================
-    # ABA 1: DASHBOARD
-    # ==========================================
-    with aba_dashboard:
-        caminho_arquivo = os.path.join(PASTA_BD, f"{paciente_ativo}.json")
-        if os.path.exists(caminho_arquivo):
-            with open(caminho_arquivo, 'r', encoding='utf-8') as f: 
-                try: hist_paciente = json.load(f)
-                except: hist_paciente = []
-            
-            if hist_paciente:
-                ultimo_laudo = hist_paciente[-1]['laudo']
-                data_laudo = hist_paciente[-1]['data']
-                
-                with st.container(border=True):
-                    st.subheader(f"📄 Último Laudo Gerado: {data_laudo}")
-                    
-                    st.markdown("#### 🧬 Análise Metabólica Cruzada")
-                    colA, colB, colC = st.columns(3)
-                    with colA: st.info(f"**Eixo Glicêmico:**\n\n{ultimo_laudo.get('eixo_glicemico', '...')}")
-                    with colB: st.info(f"**Eixo Hormonal:**\n\n{ultimo_laudo.get('eixo_hormonal', '...')}")
-                    with colC: st.info(f"**Eixo Inflamatório:**\n\n{ultimo_laudo.get('eixo_inflamatorio', '...')}")
-                    
-                    st.markdown("#### 🎯 Insights de Conduta")
-                    st.success(f"**Médica:** {ultimo_laudo.get('insight_medico', '...')}")
-                    st.success(f"**Nutricional:** {ultimo_laudo.get('insight_nutricional', '...')}")
-
-            with st.container(border=True):
-                st.subheader("📈 Evolução de Biomarcadores")
-                dados_evolucao = extrair_valores_historico(hist_paciente)
-                if dados_evolucao and len(dados_evolucao) > 0:
-                    df = pd.DataFrame(dados_evolucao)
-                    try: df["Data"] = pd.to_datetime(df["Data"]); df = df.set_index("Data").sort_index()
-                    except: df = df.set_index("Data")
-                    
-                    st.markdown("#### 🩸 Eixo Glicêmico e Resistência à Insulina")
-                    cg1, cg2, cg3 = st.columns(3)
-                    with cg1:
-                        if "Glicemia" in df.columns: st.markdown("**Glicemia de Jejum**"); st.line_chart(df[["Glicemia"]].dropna(), color="#3b82f6")
-                    with cg2:
-                        if "HbA1c" in df.columns: st.markdown("**HbA1c (%)**"); st.line_chart(df[["HbA1c"]].dropna(), color="#f59e0b")
-                    with cg3:
-                        if "HOMA-IR" in df.columns: st.markdown("**HOMA-IR**"); st.line_chart(df[["HOMA-IR"]].dropna(), color="#dc2626")
-
-                    st.markdown("#### 🫀 Perfil Lipídico e Risco Cardiovascular")
-                    cl1, cl2, cl3, cl4 = st.columns(4)
-                    with cl1:
-                        if "Colesterol Total" in df.columns: st.markdown("**Col. Total**"); st.line_chart(df[["Colesterol Total"]].dropna(), color="#64748b")
-                    with cl2:
-                        if "LDL" in df.columns: st.markdown("**LDL**"); st.line_chart(df[["LDL"]].dropna(), color="#ef4444")
-                    with cl3:
-                        if "HDL" in df.columns: st.markdown("**HDL**"); st.line_chart(df[["HDL"]].dropna(), color="#10b981")
-                    with cl4:
-                        if "Triglicerídeos" in df.columns: st.markdown("**Triglicerídeos**"); st.line_chart(df[["Triglicerídeos"]].dropna(), color="#f97316")
-
-                    st.markdown("#### ⚡ Eixo Hormonal (Metabolismo e Catabolismo)")
-                    ch1, ch2, ch3 = st.columns(3)
-                    with ch1:
-                        if "Testosterona Total" in df.columns: st.markdown("**Testosterona**"); st.line_chart(df[["Testosterona Total"]].dropna(), color="#16a34a")
-                    with ch2:
-                        if "Cortisol" in df.columns: st.markdown("**Cortisol**"); st.line_chart(df[["Cortisol"]].dropna(), color="#8b5cf6")
-                    with ch3:
-                        if "TSH" in df.columns: st.markdown("**TSH**"); st.line_chart(df[["TSH"]].dropna(), color="#d946ef")
-            
-            if len(hist_paciente) >= 2:
-                if st.button("🤖 Gerar Parecer de Evolução Clínica"):
-                    with st.spinner("Analisando progressão metabólica através dos 3 Eixos..."):
-                        parecer = analisador.gerar_comparativo_evolucao(hist_paciente)
-                        st.session_state['evolucao_gerada'] = {'paciente': paciente_ativo, 'parecer': parecer}
-                
-                if 'evolucao_gerada' in st.session_state and st.session_state['evolucao_gerada']['paciente'] == paciente_ativo:
-                    parecer = st.session_state['evolucao_gerada']['parecer']
-                    with st.container(border=True):
-                        st.markdown(parecer)
-                    
-                    html_evolucao = gerar_html_evolucao(paciente_ativo, parecer)
-                    nome_arquivo_evo = f"Evolucao_{paciente_ativo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}"
-                    st.markdown(baixar_html(html_evolucao, nome_arquivo_evo), unsafe_allow_html=True)
-            
-            with st.expander("Ver histórico bruto"): st.json(hist_paciente)
-        else: st.info("O paciente ainda não possui exames salvos nesta clínica.")
-
-    # ==========================================
-    # ABA 2: NOVA ANÁLISE
-    # ==========================================
-    with aba_analise:
-        st.markdown("### 👤 Perfil Biométrico e Objetivo")
-        
-        bio = ler_biometria(paciente_ativo)
-        
-        lista_sexo = ["Masculino", "Feminino"]
-        idx_sexo = lista_sexo.index(bio.get('sexo', "Masculino")) if bio.get('sexo', "Masculino") in lista_sexo else 0
-        
-        lista_obj = [
-            "Emagrecimento (Foco Clínico / Síndrome Metabólica)", 
-            "Manutenção / Saúde Geral", 
-            "Hipertrofia Estrita (Ganho de Massa Magra)", 
-            "Performance Atlética de Elite"
-        ]
-        idx_obj = lista_obj.index(bio.get('objetivo', lista_obj[0])) if bio.get('objetivo', lista_obj[0]) in lista_obj else 0
-        
-        lista_ativ = ["Sedentário", "Leve (1-2x sem)", "Moderado (Musculação 3-4x)", "Intenso (Musculação 5-6x)", "Atleta de Elite"]
-        idx_ativ = lista_ativ.index(bio.get('atividade', lista_ativ[2])) if bio.get('atividade', lista_ativ[2]) in lista_ativ else 2
-
-        with st.container(border=True):
-            col_b1, col_b2, col_b3, col_b4 = st.columns(4)
-            
-            with col_b1: idade_paciente = st.number_input("Idade:", min_value=0, max_value=120, value=int(bio.get('idade', 52)), step=1, key=f"id_{paciente_ativo}")
-            with col_b2: sexo_paciente = st.selectbox("Sexo:", lista_sexo, index=idx_sexo, key=f"sx_{paciente_ativo}")
-            with col_b3: peso_paciente = st.number_input("Peso Atual (kg):", min_value=30.0, max_value=250.0, value=float(bio.get('peso', 87.0)), step=0.1, key=f"ps_{paciente_ativo}")
-            with col_b4: objetivo = st.selectbox("Objetivo Clínico/Esportivo:", lista_obj, index=idx_obj, key=f"ob_{paciente_ativo}")
-
-            col_t1, col_t2 = st.columns(2)
-            with col_t1: atividade_fisica = st.selectbox("Treino/Atividade:", lista_ativ, index=idx_ativ, key=f"at_{paciente_ativo}")
-            with col_t2: modulo_selecionado = st.selectbox("Módulo Clínico de Análise:", [
-                    "Fisiologia do Esporte e Alta Performance",
-                    "Performance, Emagrecimento e Endocrinologia",
-                    "Microbiologia (Cultura e Antibiograma)",
-                    "Painel Completo (Bioquímica + Hematologia)",
-                    "Imunologia (Sorologias Básicas)",
-                    "Imunologia - Autoimunidade",
-                    "Imunologia - Alergias (IgE Específicas)",
-                    "Imunologia - Marcadores Tumorais",
-                    "Imunologia - Toxoplasmose",
-                    "Imunologia - COVID-19"
-                ])
-                
-            if st.button("💾 Salvar Perfil (Sem Exame)", key=f"btn_salvar_bio_{paciente_ativo}"):
-                bio_nova = {"idade": idade_paciente, "sexo": sexo_paciente, "peso": peso_paciente, "objetivo": objetivo, "atividade": atividade_fisica}
-                sucesso = salvar_biometria_perfil(paciente_ativo, bio_nova)
-                if sucesso:
-                    st.success("✅ Perfil biométrico atualizado com sucesso!")
-                else:
-                    st.warning("⚠️ O paciente precisa ter pelo menos um exame salvo para gravar a biometria pela primeira vez.")
-
-            contexto = st.text_area("Variáveis de Contexto:", placeholder="Ex: Uso de medicamentos, sintomas, rotina alimentar...")
-        
-        st.markdown("### 📄 Importação de Exames (Único ou em Lote)")
-        
-        uploaded_sangues = st.file_uploader("Exames de Sangue / Culturas (Pode selecionar vários)", type="pdf", accept_multiple_files=True)
-        
-        dict_datas = {}
-        if uploaded_sangues:
-            with st.container(border=True):
-                st.markdown("#### Defina as datas para os exames importados:")
-                for idx, arquivo in enumerate(uploaded_sangues):
-                    col_d1, col_d2 = st.columns([3, 1])
-                    with col_d1: st.write(f"📄 {arquivo.name}")
-                    with col_d2: dict_datas[arquivo.name] = st.date_input("Data do Exame:", key=f"data_{arquivo.name}_{idx}_{paciente_ativo}")
-
-        uploaded_inbody = st.file_uploader("⚖️ InBody ou DEXA (Opcional - Relativo ao exame mais recente)", type="pdf")
-
-        if uploaded_sangues and st.button("🚀 Processar Exames e Gerar Inteligência"):
-            
-            laudo_mais_recente = None
-            data_mais_recente = None
-            
-            biometria_atual = {
-                "idade": idade_paciente,
-                "sexo": sexo_paciente,
-                "peso": peso_paciente,
-                "objetivo": objetivo,
-                "atividade": atividade_fisica
+        with st.spinner("Processando parecer com enquadramento regulatório..."):
+            anamnese_dict = {
+                "idade": idade, "genero": genero, "queixa": queixa, "escopo": foco_avaliacao,
+                "habitos": {
+                    "sol": rotina_sol, "fps": usa_fps, "tabaco": tabagismo, 
+                    "alcool": etilismo, "treino_intenso": atividade_intensa
+                },
+                "seguranca_sistemica": {
+                    "gestante_lactante": gestante_lactante,
+                    "neuromuscular": doenca_neuromuscular, 
+                    "autoimune_ativa": doenca_autoimune, 
+                    "diabetes_descompensada": diabetes_descompensada,
+                    "tireoide_descompensada": tireoide_descompensada,
+                    "infeccao_local": infeccao_local
+                },
+                "farmacologia_alergias": {
+                    "alergia_albumina": alergia_ovo_leite, 
+                    "alergia_lidocaina": alergia_anestesicos,
+                    "alergia_medicamentosa": alergia_medicamentos, 
+                    "roacutan_12m": roacutan_recente,
+                    "corticoides_imuno": corticoide_imuno,
+                    "aminoglicosideos": uso_aminoglicosideos
+                },
+                "vascular_cicatrizacao": {
+                    "anticoagulante_aas": uso_aas, 
+                    "historico_ptose": historico_ptose, 
+                    "herpes_recorrente": historico_herpes, 
+                    "queloide": tendencia_queloide,
+                    "cirurgia_facial_previa": cirurgia_facial_previa
+                },
+                "passado_estetico": {
+                    "toxina_previa": ja_fez_toxina, 
+                    "meses_ultima_toxina": meses_ultima_toxina if ja_fez_toxina else None, 
+                    "preenchedor_ah": preenchedor_previo, 
+                    "bioestimulador_previo": bioestimulador_previo,
+                    "alerta_polimero_definitivo_pmma": polimero_definitivo,
+                    "intercorrencia_previa": intercorrencia_previa
+                }
             }
             
-            progress_text = "A extrair dados e a comunicar com a Inteligência Executiva. Por favor, aguarde."
-            my_bar = st.progress(0, text=progress_text)
+            contexto_historico = ""
+            if modo_atendimento == "Consulta de Retorno" and prontuario_referencia:
+                contexto_historico = f"""
+                HISTÓRICO DE ATENDIMENTO ANTERIOR (CONSULTA DE {prontuario_referencia['data_atendimento'][:10]}):
+                - Procedimento anterior realizado: {prontuario_referencia.get('procedimento')}
+                - Parecer e condutas anteriores: {prontuario_referencia.get('laudo_texto')[:1500]}
+                DIRETRIZ DE RETORNO:
+                Esta é uma consulta de acompanhamento/evolução. Avalie a resposta biológica, simetria muscular e planeje a próxima sessão.
+                """
             
-            total_arquivos = len(uploaded_sangues)
-            for idx, arquivo in enumerate(uploaded_sangues):
-                percentual = int(((idx) / total_arquivos) * 100)
-                my_bar.progress(percentual, text=f"Processando arquivo {idx+1} de {total_arquivos}: {arquivo.name}")
+            texto_suporte_imagem = ""
+            if imagens_payload:
+                texto_suporte_imagem = f"""
+                ANÁLISE FOTOGRÁFICA ATIVA ({len(imagens_payload)} imagem/imagens anexadas com identificação de mímica e ângulos):
                 
-                texto_sangue = extrair_texto_pdf(arquivo)
-                texto_inbody = ""
-                if idx == (total_arquivos - 1) and uploaded_inbody:
-                    texto_inbody = extrair_texto_pdf(uploaded_inbody)
-                    
-                texto_completo = texto_sangue + ("\n\n--- DADOS DE BIOIMPEDÂNCIA ---\n" + texto_inbody if texto_inbody else "")
-                contexto_completo = f"Idade: {idade_paciente} anos\nSexo: {sexo_paciente}\nPeso Atual: {peso_paciente} kg\nObjetivo Principal: {objetivo}\nNível de Treino: {atividade_fisica}\nInformações Adicionais: {contexto}"
-                
-                try:
-                    with open('diretrizes_essenciais.txt', 'r', encoding='utf-8') as f: diretrizes = f.read()
-                except FileNotFoundError: diretrizes = "Avalie buscando padrões subclínicos."
-                
-                resposta_ia = analisador.gerar_laudo_clinico(texto_completo, diretrizes, contexto_completo, modulo_selecionado)
-                
-                try:
-                    dados_laudo = json.loads(resposta_ia)
-                    if "erro" in dados_laudo: 
-                        st.error(f"Erro no ficheiro {arquivo.name}: {dados_laudo['erro']}")
-                    else:
-                        data_deste_exame = dict_datas[arquivo.name]
-                        salvar_exame(paciente_ativo, data_deste_exame, dados_laudo, biometria_atual)
-                        st.success(f"✅ Exame ({data_deste_exame}) processado e arquivado com sucesso.")
-                        laudo_mais_recente = dados_laudo
-                        data_mais_recente = data_deste_exame
-                except Exception as e: 
-                    st.error(f"Erro na geração JSON do ficheiro {arquivo.name}.")
-                    
-            my_bar.progress(100, text="Processamento concluído!")
+                DIRETRIZES MANDATÓRIAS DE LEITURA ANATÔMICA:
+                1. A FOTO 1 (FACE FRONTAL EM REPOUSO) é o único padrão basal para avaliar simetria global, proporções dos terços faciais, bolsas, ptose e abertura ocular.
+                2. REGRA DE EXCLUSÃO CRÍTICA (FOTO 2 - FRONTAL/TESTA): A elevação das sobrancelhas gera retração palpebral e exposição de esclera reflexas. É TERMINANTEMENTE PROIBIDO classificar essa abertura ocular na Foto 2 como 'olhar proeminente', 'exoftalmia' ou 'esclera aparente'. Foque unicamente na classificação das rugas dinâmicas da testa.
+                3. A FOTO 3 (GLABELA) destina-se unicamente à força dos músculos corrugadores e prócero.
+                4. A FOTO 4 (SORRISO) destina-se às linhas perioculares (orbicular dos olhos) e elevação zigomática.
+                5. IMAGENS DE PERFIL/OBLÍQUAS (se presentes): Utilize-as especificamente para avaliar ângulo da mandíbula, perda de contorno pré-jowl, projeção do mento (plano estético de Ricketts) e sustentação malar tridimensional.
+                """
             
-            if laudo_mais_recente:
-                st.session_state['resultado_analise'] = {
-                    'paciente': paciente_ativo,
-                    'laudo': laudo_mais_recente,
-                    'data': data_mais_recente,
-                    'modulo': modulo_selecionado,
-                    'html_calc': calcular_indices(laudo_mais_recente)
-                }
+            prompt_mestre = f"""
+            DADOS DO PACIENTE:
+            Paciente: {nome}, {idade} anos, Gênero: {genero}.
+            Tipo de Consulta: {modo_atendimento}
+            Queixa Relatada: "{queixa}"
+            Escopo da Avaliação: {foco_avaliacao}
+            
+            ENQUADRAMENTO PROFISSIONAL E CONSELHO DE CLASSE:
+            - Conselho: {conselho_atual} ({dados_conselho['orgao']})
+            - Categoria Profissional: {dados_conselho['termo_profissional']}
+            - Amparo Regulatório Específico: {dados_conselho['resolucoes']}
+            - Limites de Escopo do Conselho: {dados_conselho['limites']}
+            
+            Anamnese Detalhada e Rastreio Clínico: {json.dumps(anamnese_dict)}
+            {contexto_historico}
+            {texto_suporte_imagem}
 
-        if 'resultado_analise' in st.session_state and st.session_state['resultado_analise']['paciente'] == paciente_ativo:
-            res = st.session_state['resultado_analise']
-            laudo_display = res['laudo']
-            data_display = res['data']
-            modulo_display = res['modulo']
-            html_calc = res['html_calc']
-            
-            if html_calc: st.markdown(html_calc, unsafe_allow_html=True)
-            
-            modulos_avancados = ["Fisiologia do Esporte e Alta Performance", "Performance, Emagrecimento e Endocrinologia", "Painel Completo (Bioquímica + Hematologia)"]
-            if modulo_display in modulos_avancados:
-                st.subheader("📊 Resumo Executivo")
-                st.info(laudo_display.get('resumo_executivo', ''))
-                if laudo_display.get('alertas_vermelhos'): st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Críticos:</strong><br>" + "<br>".join([f"• {a}" for a in laudo_display.get('alertas_vermelhos')]) + "</div>", unsafe_allow_html=True)
-                if laudo_display.get('alertas_composicao'): st.markdown("<div class='alerta-amarelo'><strong>⚖️ Alertas de Composição Corporal (InBody/DEXA):</strong><br>" + "<br>".join([f"• {a}" for a in laudo_display.get('alertas_composicao')]) + "</div>", unsafe_allow_html=True)
-                
-                st.subheader("🧬 Análise Metabólica Cruzada")
-                cc1, cc2, cc3 = st.columns(3)
-                with cc1: st.markdown("**Eixo Glicêmico:**"); st.write(laudo_display.get('eixo_glicemico', ''))
-                with cc2: st.markdown("**Eixo Hormonal:**"); st.write(laudo_display.get('eixo_hormonal', ''))
-                with cc3: st.markdown("**Eixo Inflamatório:**"); st.write(laudo_display.get('eixo_inflamatorio', ''))
-                    
-                st.subheader("🎯 Insights para Conduta")
-                st.success(f"**Estratégia Clínica:**\n{laudo_display.get('insight_medico', '')}")
-                
-                macros = laudo_display.get('estrategia_nutricional', {})
-                if macros:
-                    st.info(f"**🔥 Alvo Calórico e Macros:**\nCalorias: {macros.get('calorias_alvo', '')} | Proteínas: {macros.get('macros', {}).get('proteinas', '')} | Carboidratos: {macros.get('macros', {}).get('carboidratos', '')} | Gorduras: {macros.get('macros', {}).get('gorduras', '')}")
-            
-            elif modulo_display == "Microbiologia (Cultura e Antibiograma)":
-                st.subheader("🦠 Análise Microbiológica e Infecciosa")
-                st.info(laudo_display.get('resumo_clinico', ''))
-                
-                bacterias = laudo_display.get('bacterias_isoladas', [])
-                if bacterias: st.markdown("<div class='alerta-vermelho'><strong>🔬 Microrganismos Isolados:</strong><br>" + "<br>".join([f"• {b}" for b in bacterias]) + "</div>", unsafe_allow_html=True)
-                else: st.success("✅ Cultura Negativa / Flora Normal.")
-                
-                col_mic1, col_mic2 = st.columns(2)
-                with col_mic1:
-                    sensiveis = laudo_display.get('antibioticos_sensiveis', [])
-                    if sensiveis: st.markdown("**✅ Antibiograma (Sensível):**\n" + "\n".join([f"- {s}" for s in sensiveis]))
-                with col_mic2:
-                    resistentes = laudo_display.get('antibioticos_resistentes', [])
-                    if resistentes: st.markdown("**🚨 Antibiograma (Resistente):**\n" + "\n".join([f"- {r}" for r in resistentes]))
-                    
-                st.subheader("💊 Diretriz Terapêutica")
-                st.warning(f"**Conduta Infecciosa:**\n{laudo_display.get('conduta_infecciosa', 'N/A')}")
-            
-            else:
-                st.subheader("📋 Resumo Clínico")
-                st.write(laudo_display.get('resumo_clinico', 'Não gerado.'))
-                if laudo_display.get('radar_cientifico'): st.info(f"🔬 **Radar Científico:**\n{laudo_display.get('radar_cientifico')}")
-            
-            nome_arquivo_laudo = f"Laudo_{paciente_ativo.replace(' ', '_')}_{data_display}"
-            html_final_laudo = gerar_html_laudo(paciente_ativo, data_display, modulo_display, laudo_display, html_calc)
-            st.markdown(baixar_html(html_final_laudo, nome_arquivo_laudo), unsafe_allow_html=True)
+            BASE CIENTÍFICA RESUMIDA:
+            {conhecimento_atual}
 
-    # ==========================================
-    # ABA 3: SINCRONIZAÇÃO FAMILIAR
-    # ==========================================
-    with aba_familia:
-        st.markdown("### 🤝 Alinhamento Metabólico de Casal / Família")
-        st.info("Selecione dois pacientes já analisados no sistema para cruzar seus dossiês e gerar uma rotina unificada.")
-        
-        with st.container(border=True):
-            col_f1, col_f2 = st.columns(2)
-            with col_f1: paciente_1 = st.selectbox("Paciente 1 (Base):", ["Selecione..."] + pacientes_salvos, key="p1")
-            with col_f2: paciente_2 = st.selectbox("Paciente 2 (Sincronizar com):", ["Selecione..."] + pacientes_salvos, key="p2")
+            DIRETRIZ DE REDAÇÃO CLÍNICA:
+            Emita o laudo em formato executivo direto, com tópicos objetivos em marcadores com traço (-). Sem enrolação descritiva. É imperativo concluir 100% de todas as 5 seções até a última linha normativa.
+
+            ESTRUTURA OBRIGATÓRIA (COMPLETE TODAS AS 5 SEÇÕES):
+            PARECER DIAGNÓSTICO E PLANO DE TRATAMENTO: {nome}, {idade} anos
+
+            1. DIAGNÓSTICO ETIOLÓGICO E STATUS DE SEGURANÇA
+            - Classificação: APTO, APTO COM RESTRIÇÕES ou INAPTO (com ressalva de escopo para {conselho_atual}).
+            - Avaliação tecidual por camada (Músculo, Osso, Gordura e Derme em repouso).
+            - Rastreio de Riscos da Anamnese (citar expressamente contraindicações ou alertas para PMMA prévio, Roacutan, anticoagulantes, diabetes/tireoide, alergias e herpes se marcados).
+
+            2. PROCEDIMENTOS INDICADOS E SEQUÊNCIA CRONOLÓGICA (PLANO TERAPÊUTICO)
+            - Sessão 1 (Prioridade Imediata): técnica principal e justificativa.
+            - Sessão 2 (Complementar): intervalo e objetivo.
+            - Sessão 3 (Manutenção): intervalo e refinamento.
+            - Procedimentos desaconselhados neste momento e justificativa objetiva (ex: contraindicar bioestimulador em área com PMMA ou microagulhamento com Roacutan recente).
+
+            3. ESPECIFICAÇÕES TÉCNICAS E POSOLOGIA DOS PROCEDIMENTOS ELEITOS
+            - Para cada técnica recomendada:
+              * Toxina: dosagem em U, reconstituição (2,5 mL/100 U) e músculos-alvo.
+              * Ácido Hialurônico: planos anatômicos, cânula 22G vs agulha, aspiração prévia, dosagens e seleção de produto (sem lidocaína se relatada alergia).
+              * Bioestimulador (PLLA/CaHA): reconstituição/diluição oficial, técnica em leque e regra dos 5 (massagem 5x/dia, 5 min, 5 dias).
+              * Outros (Fios/Desoxicolato/PDRN): doses, planos e intervalos, se indicados.
+
+            4. MARGENS DE SEGURANÇA E PROTOCOLO DE INTERCORRÊNCIAS
+            - Zonas nobres e trajetos vasculares de maior risco anatômico nas áreas tratadas (inclusive zonas com fibrose cirúrgica prévia).
+            - Protocolo imediato de reversão/intercorrência vascular (conduta imediata com hialuronidase de alta dose em saturação; conduta de nódulos, hematomas e profilaxia de herpes se indicada).
+            - Orientações de cuidados imediatos no pós-procedimento e intervalo de retorno.
+
+            5. RESPALDO NORMATIVO E DECLARAÇÃO ÉTICO-LEGAL
+            - Amparo legal: citação das normas específicas do conselho ({dados_conselho['resolucoes']}) e limites de atuação ({dados_conselho['limites']}).
+            - Literatura de referência: bulas e consensos indexados.
+            - DECLARAÇÃO MANDATÓRIA FINAL: 'Este documento é emitido como suporte à decisão clínica baseada em IA. A anamnese presencial, a indicação terapêutica e a execução técnica são de responsabilidade exclusiva e indelegável do(a) profissional assistente.'
+            """
             
-            if paciente_1 != "Selecione..." and paciente_2 != "Selecione...":
-                if paciente_1 == paciente_2:
-                    st.warning("⚠️ Selecione dois pacientes diferentes.")
+            laudo = gerar_laudo_multimodal(prompt_mestre, imagens_payload)
+            
+            if not laudo.startswith("Erro:"):
+                novo_contador = laudos_usados + 1
+                try:
+                    supabase.table("profissionais").update({
+                        "laudos_gerados_mes": novo_contador,
+                        "mes_referencia_cota": mes_atual_str
+                    }).eq("id", prof_id).execute()
+                    prof["laudos_gerados_mes"] = novo_contador
+                    prof["mes_referencia_cota"] = mes_atual_str
+                    st.session_state.perfil_profissional = prof
+                except Exception as e_cota:
+                    st.warning(f"Aviso ao debitar cota: {e_cota}")
+
+                pac_id = None
+                if paciente_selecionado:
+                    pac_id = paciente_selecionado['id']
                 else:
-                    if st.button("🔄 Gerar Planejamento Sincronizado", use_container_width=True):
-                        with st.spinner("Cruzando vias metabólicas..."):
-                            with open(os.path.join(PASTA_BD, f"{paciente_1}.json"), 'r', encoding='utf-8') as f: 
-                                try: hist_p1 = json.load(f)
-                                except: hist_p1 = []
-                            with open(os.path.join(PASTA_BD, f"{paciente_2}.json"), 'r', encoding='utf-8') as f: 
-                                try: hist_p2 = json.load(f)
-                                except: hist_p2 = []
-                                
-                            if not hist_p1 or not hist_p2: 
-                                st.error("Ambos precisam ter histórico.")
-                            else:
-                                resultado_sync = analisador.gerar_sincronizacao_familiar(paciente_1, hist_p1, paciente_2, hist_p2)
-                                try:
-                                    dados_sync = json.loads(resultado_sync)
-                                    if "erro" not in dados_sync:
-                                        st.session_state['sync_gerada'] = {'p1': paciente_1, 'p2': paciente_2, 'dados': dados_sync}
-                                    else:
-                                        st.error(dados_sync["erro"])
-                                except: st.error("Erro interno de formatação.")
-                    
-                    if 'sync_gerada' in st.session_state and st.session_state['sync_gerada']['p1'] == paciente_1 and st.session_state['sync_gerada']['p2'] == paciente_2:
-                        dados_sync = st.session_state['sync_gerada']['dados']
-                        st.success("Sincronização concluída!")
-                        st.markdown(f"**🔬 Análise Conjunta:** {dados_sync.get('analise_conjunta', '')}")
-                        st.markdown("---")
-                        col_lista1, col_lista2 = st.columns([1, 2])
-                        with col_lista1:
-                            st.write("🛒 **Lista Essencial:**")
-                            for item in dados_sync.get('lista_compras_base', []): st.markdown(f"- {item}")
-                        with col_lista2:
-                            st.subheader("🍽️ Refeições (Porções Individuais)")
-                            for ref in dados_sync.get('refeicoes_sincronizadas', []):
-                                with st.expander(f"🔹 {ref.get('refeicao', '')} — Base: {ref.get('base_alimentar', '')}"):
-                                    r1, r2 = st.columns(2)
-                                    with r1: st.markdown(f"**{paciente_1}:**<br>{ref.get('porcao_p1', '')}", unsafe_allow_html=True)
-                                    with r2: st.markdown(f"**{paciente_2}:**<br>{ref.get('porcao_p2', '')}", unsafe_allow_html=True)
-                        st.info(f"💡 **Dica (Meal Prep):** {dados_sync.get('dica_preparo', '')}")
-
-    # ==========================================
-    # ABA 4: CONSULTA TACO
-    # ==========================================
-    with aba_taco:
-        st.markdown("### 🍎 Tabela TACO - Inteligência Nutricional")
-        diretorio_atual = os.path.dirname(os.path.abspath(__file__))
-        caminho_taco = os.path.join(diretorio_atual, "taco.csv")
-        
-        with st.container(border=True):
-            if os.path.exists(caminho_taco):
-                tentativas = [
-                    {"sep": ",", "encoding": "utf-8", "skiprows": 0},
-                    {"sep": ";", "encoding": "utf-8", "skiprows": 0},
-                    {"sep": ",", "encoding": "latin-1", "skiprows": 0},
-                    {"sep": ";", "encoding": "latin-1", "skiprows": 0},
-                    {"sep": ",", "encoding": "utf-8", "skiprows": 2},
-                    {"sep": ";", "encoding": "utf-8", "skiprows": 2},
-                    {"sep": ",", "encoding": "latin-1", "skiprows": 2},
-                    {"sep": ";", "encoding": "latin-1", "skiprows": 2}
-                ]
+                    novo_pac = supabase.table("pacientes").insert({
+                        "profissional_id": prof_id,
+                        "nome": nome,
+                        "idade": idade,
+                        "genero": genero,
+                        "queixa_principal": queixa
+                    }).execute()
+                    if novo_pac.data:
+                        pac_id = novo_pac.data[0]['id']
                 
-                melhor_df = pd.DataFrame()
-                max_cols = 0
-                for config in tentativas:
+                if pac_id:
+                    pdf_plano = gerar_pdf(laudo, nome, foco_avaliacao, prof)
+                    pdf_tcle = gerar_tcle_pdf(nome, foco_avaliacao, prof)
+                    
+                    st.session_state.laudo_ativo = laudo
+                    st.session_state.paciente_atendido = nome
+                    st.session_state.pdf_plano_bytes = pdf_plano
+                    st.session_state.pdf_tcle_bytes = pdf_tcle
+                    st.session_state.ultimo_pac_id = pac_id
+                    
+                    res_pront = supabase.table("prontuarios").insert({
+                        "paciente_id": pac_id,
+                        "profissional_id": prof_id,
+                        "procedimento": foco_avaliacao,
+                        "anamnese_dados": anamnese_dict,
+                        "laudo_texto": laudo
+                    }).execute()
+                    
+                    if res_pront.data:
+                        pront_id = res_pront.data[0]['id']
+                        st.session_state.ultimo_pront_id = pront_id
+                        
+                        fotos_links = []
+                        if imagens_payload:
+                            fotos_links = salvar_fotos_storage(imagens_payload, prof_id, pac_id, pront_id)
+                        
+                        url_plano, url_tcle = salvar_pdfs_storage(pdf_plano, pdf_tcle, prof_id, pac_id, pront_id)
+                        
+                        dados_update = {}
+                        if fotos_links:
+                            dados_update["fotos_urls"] = fotos_links
+                        if url_plano:
+                            dados_update["pdf_plano_url"] = url_plano
+                        if url_tcle:
+                            dados_update["pdf_tcle_url"] = url_tcle
+                            
+                        if dados_update:
+                            try:
+                                supabase.table("prontuarios").update(dados_update).eq("id", pront_id).execute()
+                            except Exception as e:
+                                st.warning(f"Aviso ao vincular links no prontuário: {e}")
+            else:
+                st.error(laudo)
+
+# ================= 12. EXIBIÇÃO PERSISTENTE E ASSINATURA EM TELA =================
+if st.session_state.laudo_ativo:
+    st.markdown("---")
+    st.subheader(f"📄 Parecer Diagnóstico e Plano Terapêutico Integrado ({st.session_state.paciente_atendido})")
+    
+    with st.expander("👁️ Visualizar Conteúdo Integral do Parecer Clínico", expanded=True):
+        st.markdown(st.session_state.laudo_ativo)
+    
+    st.divider()
+    
+    st.subheader("✍️ Assinatura Digital do Paciente (TCLE)")
+    st.caption("Solicite ao paciente assinar diretamente no campo abaixo usando o dedo, caneta touch ou mouse.")
+    
+    col_canvas, col_acoes = st.columns([2, 1])
+    with col_canvas:
+        # Largura adaptada para 340px: cabe em qualquer celular sem vazar horizontalmente
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 255, 255, 0)",
+            stroke_width=2,
+            stroke_color="#000000",
+            background_color="#FFFFFF",
+            height=140,
+            width=340,
+            drawing_mode="freedraw",
+            key="canvas_assinatura_paciente",
+        )
+        
+    with col_acoes:
+        st.write("")
+        st.write("")
+        if st.button("Gravar Assinatura no TCLE", use_container_width=True):
+            if canvas_result.image_data is not None:
+                img_data = canvas_result.image_data
+                if img_data[:, :, 3].any():
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+                        caminho_tmp = tmp_file.name
+                        img_pil = Image.fromarray(img_data.astype('uint8'), 'RGBA')
+                        img_pil.save(caminho_tmp, format="PNG")
+                        
+                    novo_tcle_bytes = gerar_tcle_pdf(
+                        st.session_state.paciente_atendido,
+                        foco_avaliacao,
+                        prof,
+                        caminho_tmp
+                    )
+                    st.session_state.pdf_tcle_bytes = novo_tcle_bytes
+                    
+                    if st.session_state.ultimo_pront_id and st.session_state.ultimo_pac_id:
+                        _, nova_url_tcle = salvar_pdfs_storage(
+                            st.session_state.pdf_plano_bytes,
+                            novo_tcle_bytes,
+                            prof_id,
+                            st.session_state.ultimo_pac_id,
+                            st.session_state.ultimo_pront_id
+                        )
+                        if nova_url_tcle:
+                            supabase.table("prontuarios").update({"pdf_tcle_url": nova_url_tcle}).eq("id", st.session_state.ultimo_pront_id).execute()
+                            
                     try:
-                        temp_df = pd.read_csv(caminho_taco, sep=config["sep"], encoding=config["encoding"], skiprows=config["skiprows"], on_bad_lines='skip')
-                        if len(temp_df.columns) > max_cols:
-                            max_cols = len(temp_df.columns)
-                            melhor_df = temp_df
-                    except: continue
-                    
-                df_taco = melhor_df
-                
-                if not df_taco.empty:
-                    df_taco = df_taco.dropna(axis=1, how='all')
-                    busca_alimento = st.text_input("🔍 Procure o alimento (ex: frango, leite, arroz):")
-                    
-                    if busca_alimento:
-                        busca_lower = busca_alimento.lower()
-                        mask = np.column_stack([df_taco[col].astype(str).str.lower().str.contains(busca_lower, na=False) for col in df_taco.columns])
-                        resultado = df_taco.loc[mask.any(axis=1)]
-                        if not resultado.empty: st.dataframe(resultado, use_container_width=True)
-                        else: st.warning("Alimento não encontrado.")
-                    else:
-                        st.dataframe(df_taco.head(50), use_container_width=True)
+                        os.remove(caminho_tmp)
+                    except Exception:
+                        pass
+                        
+                    st.success("Assinatura gravada com sucesso no TCLE!")
+                    st.rerun()
                 else:
-                    st.error("O ficheiro existe, mas está corrompido.")
-            else:
-                st.error(f"⚠️ O ficheiro 'taco.csv' não foi encontrado na pasta do sistema.")
+                    st.warning("Assine no quadro antes de clicar no botão.")
 
-    # ==========================================
-    # ABA 5: PRESCRIÇÃO DE CARDÁPIO
-    # ==========================================
-    with aba_cardapio:
-        caminho_arquivo = os.path.join(PASTA_BD, f"{paciente_ativo}.json")
-        if not os.path.exists(caminho_arquivo):
-            st.warning("É necessário gerar o Laudo do paciente na Aba 'Nova Análise' antes de prescrever um cardápio.")
-        else:
-            with open(caminho_arquivo, 'r', encoding='utf-8') as f: 
-                try: hist_paciente = json.load(f)
-                except: hist_paciente = []
-                
-            if not hist_paciente:
-                st.warning("Histórico vazio. Gere um laudo primeiro.")
-            else:
-                laudo_recente = hist_paciente[-1].get('laudo', {})
-                alertas = laudo_recente.get('alertas_vermelhos', []) + laudo_recente.get('alertas_composicao', [])
-                macros = laudo_recente.get('estrategia_nutricional', {})
-                
-                st.markdown("### 🧠 Painel de Decisão Clínica Compartilhada")
-                sugestao_dieta_ia = "Padrão / Reeducação Alimentar"
-                for alerta in alertas:
-                    alerta_lower = str(alerta).lower()
-                    if "insulina" in alerta_lower or "glicada" in alerta_lower or "homa" in alerta_lower or "glicemia" in alerta_lower:
-                        sugestao_dieta_ia = "Low Carb (Foco Sensibilidade à Insulina) ou Dieta Mediterrânea"
-                        break
-                    elif "triglicer" in alerta_lower or "colesterol" in alerta_lower or "ldl" in alerta_lower:
-                        sugestao_dieta_ia = "Dieta Mediterrânea (Foco Anti-inflamatório / Controle Lipídico)"
-                        break
-
-                with st.container(border=True):
-                    col_dec1, col_dec2 = st.columns([1, 1])
-                    with col_dec1:
-                        st.markdown("#### 🚨 Condições Clínicas Detetadas:")
-                        if alertas:
-                            for alerta in alertas: st.markdown(f"- <span style='color:#fca5a5;'>{alerta}</span>", unsafe_allow_html=True)
-                        else: st.success("✅ Nenhum marcador de risco crítico detetado.")
-                        st.info(f"💡 **Recomendação da IA:** Sugere-se a adoção da linha **{sugestao_dieta_ia}**.")
-                    
-                    with col_dec2:
-                        st.markdown("#### 🎯 Alvo Macronutricional Ativo:")
-                        if isinstance(macros, dict) and macros.get('macros'):
-                            st.write(f"**Calorias Totais:** {macros.get('calorias_alvo', 'N/A')}")
-                            st.write(f"**Proteínas:** {macros.get('macros', {}).get('proteinas', 'N/A')}")
-                            st.write(f"**Carboidratos:** {macros.get('macros', {}).get('carboidratos', 'N/A')}")
-                            st.write(f"**Gorduras:** {macros.get('macros', {}).get('gorduras', 'N/A')}")
-                            st.caption(f"*Justificativa:* {macros.get('justificativa_clinica', '')}")
-                        else: st.warning("Estratégia de macros não encontrada no último laudo.")
-                
-                st.markdown("### 📋 Configuração da Dieta Semanal")
-                with st.container(border=True):
-                    col_cfg1, col_cfg2 = st.columns(2)
-                    with col_cfg1:
-                        estrategia_escolhida = st.selectbox("Linha Dietética a Aplicar (Validação):", [
-                            "Padrão / Reeducação Alimentar",
-                            "Dieta Mediterrânea (Foco Anti-inflamatório/Lipídios)",
-                            "Low Carb (Foco Sensibilidade à Insulina)",
-                            "Ciclo de Carboidratos (Foco Alta Performance/Hipertrofia)",
-                            "Plant-Based / Vegetariana"
-                        ])
-                    with col_cfg2:
-                        restricoes = st.text_input("Restrições e Preferências:", placeholder="Ex: Alérgico a castanhas, treina às 19h...")
-                        
-                    caminho_cardapio = os.path.join(PASTA_BD, f"{paciente_ativo}_cardapio.json")
-                    
-                    if st.button("🍽️ Gerar Cardápio Semanal Sob Medida", use_container_width=True):
-                        with st.spinner("Construindo as refeições..."):
-                            cardapio_gerado = analisador.gerar_cardapio_semanal(paciente_ativo, laudo_recente, estrategia_escolhida, restricoes)
-                            
-                            with open(caminho_cardapio, 'w', encoding='utf-8') as fc:
-                                json.dump({"cardapio": cardapio_gerado}, fc, ensure_ascii=False)
-                                
-                            st.rerun() 
-                    
-                    if os.path.exists(caminho_cardapio):
-                        with open(caminho_cardapio, 'r', encoding='utf-8') as fc:
-                            dados_c = json.load(fc)
-                            cardapio_gerado = dados_c.get("cardapio", "")
-                            
-                        if cardapio_gerado:
-                            st.success("Último Cardápio formulado carregado com sucesso!")
-                            html_c = gerar_html_cardapio(paciente_ativo, cardapio_gerado)
-                            st.markdown(baixar_html(html_c, f"Cardapio_{paciente_ativo}"), unsafe_allow_html=True)
-                            st.markdown("<div style='background: rgba(15, 23, 42, 0.5); padding:20px; border-radius:10px;'>", unsafe_allow_html=True)
-                            st.markdown(cardapio_gerado)
-                            st.markdown("</div>", unsafe_allow_html=True)
-
-    # ==========================================
-    # ABA 6: MICROSCOPIA E VISÃO COMPUTACIONAL
-    # ==========================================
-    with aba_microscopia:
-        st.markdown("### 🧫 Visão Computacional para Lâminas de Microscópio")
-        st.info("Faça o upload de uma fotografia da lâmina do microscópio para realizar a varredura.")
-        
-        col_m1, col_m2 = st.columns([1, 2])
-        
-        with col_m1:
-            with st.container(border=True):
-                tipo_lamina = st.selectbox("Foco da Análise Laboratorial:", [
-                    "Esfregaço Sanguíneo (Série Vermelha e Branca)",
-                    "Microbiologia (Coloração de Gram / Ziehl-Neelsen)",
-                    "Sedimentoscopia de Urina (EAS)",
-                    "Parasitologia / Fezes",
-                    "Morfologia Celular Geral"
-                ])
-                contexto_lamina = st.text_area("Contexto Clínico ou Suspeita:", placeholder="Ex: Suspeita de anemia...")
-                imagem_lamina = st.file_uploader("Upload da Lâmina (JPG/PNG)", type=["jpg", "jpeg", "png"])
-                
-                if imagem_lamina:
-                    st.image(imagem_lamina, caption="Lâmina Carregada", use_container_width=True)
-                
-        with col_m2:
-            with st.container(border=True):
-                if imagem_lamina and st.button("🔍 Iniciar Varredura Morfológica", use_container_width=True):
-                    with st.spinner("A rede neural está a varrer a morfologia e os padrões de coloração..."):
-                        img_bytes = imagem_lamina.getvalue()
-                        resultado_lamina = analisador.analisar_lamina_microscopia(img_bytes, contexto_lamina, tipo_lamina)
-                        
-                        try:
-                            dados_lamina = json.loads(resultado_lamina)
-                            if "erro" not in dados_lamina:
-                                st.session_state['micro_gerada'] = {
-                                    'paciente': paciente_ativo,
-                                    'dados': dados_lamina,
-                                    'foco': tipo_lamina,
-                                    'contexto': contexto_lamina
-                                }
-                            else:
-                                st.error(dados_lamina["erro"])
-                        except json.JSONDecodeError: st.error("Erro: A IA não retornou o formato estruturado correto.")
-                
-                if 'micro_gerada' in st.session_state and st.session_state['micro_gerada']['paciente'] == paciente_ativo:
-                    dados_lamina = st.session_state['micro_gerada']['dados']
-                    tipo_lamina_display = st.session_state['micro_gerada']['foco']
-                    contexto_lamina_display = st.session_state['micro_gerada']['contexto']
-                    
-                    st.success("✅ Varredura Morfológica Concluída!")
-                    st.markdown("#### 🔬 Achados Estruturais na Lâmina")
-                    for achado in dados_lamina.get("achados_morfologicos", []):
-                        st.markdown(f"**• {achado.get('estrutura', 'Estrutura')}:** {achado.get('descricao', '')}")
-                    
-                    st.markdown("---")
-                    st.markdown(f"**🧫 Qualidade da Amostra:** {dados_lamina.get('qualidade_amostra', 'N/A')}")
-                    st.info(f"**🩺 Hipótese Diagnóstica de Bancada:** {dados_lamina.get('hipotese_diagnostica', 'N/A')}")
-                    
-                    alertas = dados_lamina.get("alertas", [])
-                    if alertas:
-                        st.markdown("<div class='alerta-vermelho'><strong>🚨 Alertas Morfológicos Identificados:</strong><br>" + "<br>".join([f"• {a}" for a in alertas]) + "</div>", unsafe_allow_html=True)
-                    else:
-                        st.success("Nenhuma atipia crítica ou alerta morfológico grave identificado.")
-                        
-                    data_atual = datetime.now().strftime('%d/%m/%Y')
-                    linhas_achados = "".join([f"<li><strong>{a.get('estrutura', '')}:</strong> {a.get('descricao', '')}</li>" for a in dados_lamina.get("achados_morfologicos", [])])
-                    alertas_html = f"<div style='background-color: #fef2f2; border-left: 5px solid #ef4444; padding: 15px; margin-bottom: 20px; color: #b91c1c;'><strong>🚨 Alertas Morfológicos:</strong><ul>{''.join([f'<li>{a}</li>' for a in alertas])}</ul></div>" if alertas else ""
-                        
-                    html_microscopia = f"""
-                    <!DOCTYPE html><html lang="pt-PT"><head><meta charset="UTF-8"><title>Laudo de Microscopia - {paciente_ativo}</title>
-                    <style>body {{ font-family: 'Segoe UI', sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 30px; line-height: 1.6; }} .header {{ text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; }} .header h1 {{ color: #1e3a8a; margin: 0 0 5px 0; font-size: 2.2em; }} .box {{ background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }} h2 {{ color: #2563eb; font-size: 1.4em; border-bottom: 1px solid #bfdbfe; padding-bottom: 5px; margin-top: 25px; }} ul {{ padding-left: 20px; }} li {{ margin-bottom: 8px; }} .footer {{ margin-top: 50px; font-size: 0.85em; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }}</style>
-                    </head><body><div class="header"><h1>LAUDO DE MICROSCOPIA DIGITAL</h1><h3>Análise Morfológica Assistida por IA</h3></div>
-                    <p><strong>Paciente:</strong> {paciente_ativo} | <strong>Data da Análise:</strong> {data_atual}</p><p><strong>Foco da Análise:</strong> {tipo_lamina_display}</p><p><strong>Contexto Clínico:</strong> {contexto_lamina_display}</p>
-                    {alertas_html}<h2>🔬 Achados Estruturais</h2><div class="box"><ul>{linhas_achados}</ul></div>
-                    <h2>🧫 Qualidade da Amostra</h2><p>{dados_lamina.get('qualidade_amostra', 'N/A')}</p>
-                    <h2>🩺 Hipótese Diagnóstica</h2><div class="box" style="background-color: #f0fdf4; border-color: #22c55e;"><p><strong>Conclusão de Bancada:</strong> {dados_lamina.get('hipotese_diagnostica', 'N/A')}</p></div>
-                    <div class="footer">Gerado por Nexus Clínico - Visão Computacional para Biomedicina.</div></body></html>
-                    """
-                    nome_arquivo_micro = f"Microscopia_{paciente_ativo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}"
-                    st.markdown(baixar_html(html_microscopia, nome_arquivo_micro), unsafe_allow_html=True)
-                elif not imagem_lamina:
-                    st.markdown("#### Resultados da Varredura")
-                    st.write("Aguardando upload da fotografia e o comando para iniciar a varredura neural...")
+    st.markdown("### 📥 Documentos para Download")
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        st.download_button(
+            label="⬇️ Baixar Plano de Tratamento Completo (PDF)",
+            data=st.session_state.pdf_plano_bytes,
+            file_name=f"Plano_Tratamento_{st.session_state.paciente_atendido.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+    with col_d2:
+        st.download_button(
+            label="⬇️ Baixar Termo de Consentimento (TCLE) com Assinatura (PDF)",
+            data=st.session_state.pdf_tcle_bytes,
+            file_name=f"TCLE_{st.session_state.paciente_atendido.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
