@@ -19,7 +19,7 @@ SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://xhkekpyokrcvhgepatmc.supa
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "sb_publishable__lopYakoLGVj7-uFY25r4A_9Hzs-2nN")
 ANTHROPIC_API_KEY = st.secrets.get("ANTHROPIC_API_KEY", "")
 
-# Configuração ajustada para garantir expansão inicial no mobile
+# Configuração estável
 st.set_page_config(
     page_title="Nexus Estética AI", 
     layout="wide", 
@@ -66,20 +66,17 @@ MAPA_CONSELHOS = {
     }
 }
 
-# ================= 2. ESTÉTICA VISUAL (CSS) =================
-# Mantém o botão de expansão lateral do mobile ativo e remove apenas a barra superior desnecessária
+# ================= 2. ESTÉTICA VISUAL (CSS LIMPO E SEM BLOQUEIOS) =================
 st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    [data-testid="stToolbar"] {visibility: hidden;}
     .stButton>button {
         background-color: #C5A880 !important;
         color: white !important;
         border-radius: 8px !important;
         border: none !important;
-        height: 50px !important;
+        min-height: 48px !important;
         font-weight: bold !important;
+        font-size: 15px !important;
         transition: all 0.3s ease-in-out !important;
     }
     .stButton>button:hover {
@@ -108,6 +105,8 @@ if "ultimo_pront_id" not in st.session_state:
     st.session_state.ultimo_pront_id = None
 if "ultimo_pac_id" not in st.session_state:
     st.session_state.ultimo_pac_id = None
+if "exibir_formulario_mobile" not in st.session_state:
+    st.session_state.exibir_formulario_mobile = True
 
 # Auto-reconectar via Parâmetro de URL após F5
 if not st.session_state.usuario_logado and "user_id" in st.query_params:
@@ -450,7 +449,6 @@ def gerar_laudo_multimodal(prompt_texto, imagens_payload):
             "text": prompt_texto
         })
         
-        # Chamada estável sem parâmetro experimental quebrado
         resposta = client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=6000,
@@ -602,7 +600,6 @@ limite_laudos = prof.get("limite_laudos_mes", 30) or 30
 laudos_usados = prof.get("laudos_gerados_mes", 0) or 0
 mes_registrado = prof.get("mes_referencia_cota", mes_atual_str)
 
-# Se mudou de mês, zera o contador no banco e na memória
 if mes_registrado != mes_atual_str:
     try:
         supabase.table("profissionais").update({
@@ -619,6 +616,7 @@ if mes_registrado != mes_atual_str:
 cota_esgotada = (laudos_usados >= limite_laudos)
 saldo_restante = max(0, limite_laudos - laudos_usados)
 
+# Informações de perfil também disponíveis na barra lateral (desktop)
 with st.sidebar:
     if os.path.exists("logo.jpg"):
         st.image("logo.jpg", use_container_width=True)
@@ -629,7 +627,6 @@ with st.sidebar:
     if prof:
         st.caption(f"{conselho_atual}: {prof.get('registro')} ({dados_conselho['termo_profissional']})")
 
-    # ================= MONITOR DE ASSINATURA & COTA =================
     with st.expander("📊 Plano & Cota de Laudos", expanded=True):
         st.markdown(f"**Ciclo Atual:** `{mes_atual_str}`")
         st.progress(min(1.0, laudos_usados / max(1, limite_laudos)))
@@ -639,48 +636,7 @@ with st.sidebar:
         else:
             st.success(f"Disponíveis: **{saldo_restante}** avaliações neste mês.")
     
-    # ================= GESTÃO DE LOGÓTIPO DA CLÍNICA =================
-    with st.expander("🏷️ Logotipo da Clínica / Consultório"):
-        logo_existente = prof.get("logo_url") if prof else None
-        if logo_existente:
-            st.image(logo_existente, caption="Marca Atual nos PDFs", use_container_width=True)
-            if st.button("Remover Logotipo Atual", use_container_width=True):
-                try:
-                    supabase.table("profissionais").update({"logo_url": None}).eq("id", prof_id).execute()
-                    prof["logo_url"] = None
-                    st.session_state.perfil_profissional = prof
-                    st.success("Logotipo removido com sucesso!")
-                    st.rerun()
-                except Exception as e_rem:
-                    st.error(f"Erro ao remover logo: {e_rem}")
-        
-        logo_upload = st.file_uploader("Carregar Logomarca (PNG ou JPG)", type=["png", "jpg", "jpeg"], key="up_logo_prof")
-        if logo_upload is not None:
-            if st.button("Salvar Logotipo no Perfil", use_container_width=True, type="primary"):
-                try:
-                    img_logo = Image.open(logo_upload)
-                    img_logo.thumbnail((400, 150), Image.Resampling.LANCZOS)
-                    buffer_logo = io.BytesIO()
-                    img_logo.save(buffer_logo, format="PNG")
-                    bytes_logo = buffer_logo.getvalue()
-
-                    caminho_logo_storage = f"logos/logo_{prof_id}.png"
-                    supabase.storage.from_("logos-profissionais").upload(
-                        path=caminho_logo_storage,
-                        file=bytes_logo,
-                        file_options={"content-type": "image/png", "upsert": "true"}
-                    )
-                    url_logo_pub = supabase.storage.from_("logos-profissionais").get_public_url(caminho_logo_storage)
-                    
-                    supabase.table("profissionais").update({"logo_url": url_logo_pub}).eq("id", prof_id).execute()
-                    prof["logo_url"] = url_logo_pub
-                    st.session_state.perfil_profissional = prof
-                    st.success("Logotipo salvo com sucesso! Ele aparecerá nos próximos laudos emitidos.")
-                    st.rerun()
-                except Exception as e_logo:
-                    st.error(f"Erro ao salvar logo: {e_logo}")
-
-    if st.button("Sair / Desconectar"):
+    if st.button("Sair / Desconectar", key="btn_sair_sidebar"):
         st.session_state.usuario_logado = None
         st.session_state.perfil_profissional = None
         st.session_state.laudo_ativo = None
@@ -692,40 +648,21 @@ with st.sidebar:
             del st.query_params["user_id"]
         st.rerun()
 
-    caminho_manual = "Manual_Usuario_Nexus_Estetica.pdf"
-    if os.path.exists(caminho_manual):
-        with open(caminho_manual, "rb") as f_manual:
-            bytes_manual = f_manual.read()
-        st.download_button(
-            label="📘 Baixar Manual do Usuário (PDF)",
-            data=bytes_manual,
-            file_name="Manual_Usuario_Nexus_Estetica.pdf",
-            mime="application/pdf",
-            help="Clique para descarregar o guia operacional rápido do Nexus Estética em PDF"
-        )
-
-    st.divider()
-
-# ================= CABEÇALHO PRINCIPAL COM LOGO =================
+# ================= CABEÇALHO PRINCIPAL =================
 if os.path.exists("logo.jpg"):
     col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
     with col_l2:
         st.image("logo.jpg", width=140)
 
 st.title("✨ Nexus Estética - Suporte à Decisão Clínica")
-conhecimento_atual, msg_status, lista_docs = carregar_conhecimento()
-if conhecimento_atual == "":
-    st.warning("⚠️ Nenhuma diretriz encontrada.")
-else:
-    st.success(f"✅ {msg_status}")
-    with st.expander("📚 Acervo Técnico e Regulatório Indexado"):
-        for doc in lista_docs:
-            st.markdown(f"- 📄 `{doc}`")
+st.caption(f"Profissional: **{prof.get('nome')}** | {conselho_atual} {prof.get('registro')} | Cota: **{saldo_restante}** laudos restantes")
 
-# ================= 8. GESTÃO DE PACIENTES E ANAMNESE EXPANDIDA =================
-with st.sidebar:
-    st.header("📋 Anamnese e Queixa do Paciente")
-    modo_atendimento = st.radio("Tipo de Atendimento", ["Novo Paciente", "Consulta de Retorno"])
+# ================= SOLUÇÃO DEFINITIVA: FORMULÁRIO ACESSÍVEL EM QUALQUER TELA =================
+# O formulário da anamnese agora fica dentro de um Expander nativo e direto no corpo do app
+# Isso garante que no celular NINGUÉM fique dependendo de puxar lateral nem sofra com menus sumidos.
+
+with st.expander("📋 ABRIR FICHA DO PACIENTE & ANAMNESE CLÍNICA", expanded=st.session_state.exibir_formulario_mobile):
+    modo_atendimento = st.radio("Tipo de Atendimento", ["Novo Paciente", "Consulta de Retorno"], horizontal=True)
     
     paciente_selecionado = None
     prontuario_referencia = None
@@ -779,14 +716,18 @@ with st.sidebar:
     ])
     
     # ================= ANAMNESE ESTRUTURADA EM 5 BLOCOS CLÍNICOS =================
-    with st.expander("☀️ 1. Hábitos e Estilo de Vida", expanded=False):
+    aba_hab, aba_seg, aba_farm, aba_vasc, aba_est = st.tabs([
+        "☀️ Hábitos", "🛡️ Segurança", "💊 Fármacos", "🩸 Vascular", "💉 Histórico Estético"
+    ])
+    
+    with aba_hab:
         rotina_sol = st.selectbox("Exposição Solar", ["Baixa (< 30 min)", "Moderada (30m a 2h)", "Alta (> 2h)"])
         usa_fps = st.checkbox("Usa protetor solar diariamente", value=True)
         tabagismo = st.checkbox("Tabagista ativo")
         etilismo = st.checkbox("Consumo frequente de álcool")
         atividade_intensa = st.checkbox("Pratica musculação / treino intenso (alta demanda metabólica)")
 
-    with st.expander("🛡️ 2. Segurança Sistêmica & Metabolismo", expanded=False):
+    with aba_seg:
         gestante_lactante = st.checkbox("Gestante ou Lactante")
         doenca_neuromuscular = st.checkbox("Doença Neuromuscular (Miastenia gravis, Eaton-Lambert)")
         doenca_autoimune = st.checkbox("Doença Autoimune Ativa (Lúpus, Artrite, Psoríase)")
@@ -794,7 +735,7 @@ with st.sidebar:
         tireoide_descompensada = st.checkbox("Disfunção tireoidiana descompensada (Hipotireoidismo/Hashimoto)")
         infeccao_local = st.checkbox("Lesão inflamatória / Infecção ativa na face")
 
-    with st.expander("💊 3. Farmacologia, Medicamentos & Alergias", expanded=False):
+    with aba_farm:
         alergia_ovo_leite = st.checkbox("Alergia a Albumina Humana ou Caseína")
         alergia_anestesicos = st.checkbox("Alergia a Lidocaína ou Anestésicos Locais")
         alergia_medicamentos = st.checkbox("Alergia medicamentosa (AINEs, Dipirona, Antibióticos)")
@@ -802,14 +743,14 @@ with st.sidebar:
         corticoide_imuno = st.checkbox("Uso contínuo de Corticosteroides ou Imunossupressores")
         uso_aminoglicosideos = st.checkbox("Uso de Aminoglicosídeos ou Relaxantes Musculares")
 
-    with st.expander("🩸 4. Coagulação, Risco Vascular & Cicatrização", expanded=False):
+    with aba_vasc:
         uso_aas = st.checkbox("Uso de AAS, Anticoagulantes ou Antiagregantes (NOACs, Ginkgo)")
         historico_ptose = st.checkbox("Histórico de ptose palpebral prévia pós-toxina")
         historico_herpes = st.checkbox("Histórico de Herpes Simples Labial/Facial recorrente")
         tendencia_queloide = st.checkbox("Tendência a queloide ou cicatriz hipertrófica")
         cirurgia_facial_previa = st.checkbox("Cirurgia facial prévia (Rinoplastia, Blefaroplastia, Lifting)")
 
-    with st.expander("💉 5. Passado Estético & Presença de Polímeros", expanded=False):
+    with aba_est:
         ja_fez_toxina = st.checkbox("Já aplicou Toxina anteriormente", value=True if modo_atendimento == "Consulta de Retorno" else False)
         meses_ultima_toxina = 1 if modo_atendimento == "Consulta de Retorno" else 12
         if ja_fez_toxina:
@@ -818,12 +759,6 @@ with st.sidebar:
         bioestimulador_previo = st.checkbox("Já realizou Bioestimulador de Colágeno (PLLA, CaHA ou Fios)")
         polimero_definitivo = st.checkbox("⚠️ Presença de Material Definitivo (PMMA, Silicone, Metacrilato)")
         intercorrencia_previa = st.checkbox("Histórico de necrose vascular, nódulo inflamatório ou granuloma")
-
-    st.divider()
-    rotulo_botao = "GERAR PLANO DE RETORNO E EVOLUÇÃO" if modo_atendimento == "Consulta de Retorno" else "DIAGNOSTICAR E PLANEJAR TRATAMENTO"
-    gerar = st.button(rotulo_botao, type="primary", disabled=cota_esgotada)
-    if cota_esgotada:
-        st.sidebar.error("❌ Emissão bloqueada: cota de laudos esgotada neste ciclo.")
 
 # ================= 9. ABA DE HISTÓRICO VISUAL (RETORNO) =================
 if modo_atendimento == "Consulta de Retorno" and prontuario_referencia:
@@ -854,9 +789,9 @@ if modo_atendimento == "Consulta de Retorno" and prontuario_referencia:
                 with col_f_ant[i_foto % 4]:
                     st.image(url_f, caption=f"Anterior {i_foto+1}", use_container_width=True)
 
-# ================= 10. ENTRADA MULTIMODAL ATUAL (PADRONIZADA POR MÍMICA + PERFIS OPCIONAIS) =================
+# ================= 10. PROTOCOLO FOTOGRÁFICO =================
 st.subheader("📷 Protocolo Fotográfico Clínico Padronizado")
-st.caption("Organize as fotografias de acordo com as expressões para evitar diagnósticos falsos de mímica forçada.")
+st.caption("Organize as fotografias de acordo com as expressões para análise do sistema.")
 
 col_upload1, col_upload2 = st.columns(2)
 
@@ -865,31 +800,27 @@ with col_upload1:
         "1. Face Frontal - REPOUSO (Mandatória)",
         type=["jpg", "jpeg", "png"],
         key="f_repouso",
-        help="Rosto totalmente relaxado, sem expressões, lábios selados e olhar no horizonte."
+        help="Rosto relaxado, sem expressões."
     )
     foto_glabela = st.file_uploader(
         "3. Dinâmica - GLABELA / BRAVO",
         type=["jpg", "jpeg", "png"],
-        key="f_glabela",
-        help="Solicite ao paciente que aproxime as sobrancelhas com força (expressão de bravo)."
+        key="f_glabela"
     )
 
 with col_upload2:
     foto_frontal = st.file_uploader(
         "2. Dinâmica - MÚSCULO FRONTAL / TESTA",
         type=["jpg", "jpeg", "png"],
-        key="f_frontal",
-        help="Solicite ao paciente que levante as sobrancelhas ao máximo (expressão de surpresa)."
+        key="f_frontal"
     )
     foto_sorriso = st.file_uploader(
         "4. Dinâmica - SORRISO FORÇADO",
         type=["jpg", "jpeg", "png"],
-        key="f_sorriso",
-        help="Sorriso aberto e forçado para evidenciar o músculo orbicular dos olhos (pés de galinha)."
+        key="f_sorriso"
     )
 
-with st.expander("📐 Fotografias Complementares de Contorno (Opcional - Perfil e Oblíquas)"):
-    st.caption("Ângulos para refinamento de linha de mandíbula, sulco nasogeniano, queixo e projeção malar.")
+with st.expander("📐 Fotografias Complementares de Contorno (Perfil e Oblíquas)"):
     col_lat1, col_lat2 = st.columns(2)
     with col_lat1:
         foto_perfil_dir = st.file_uploader("Perfil Direito (90°)", type=["jpg", "jpeg", "png"], key="f_p_dir")
@@ -922,14 +853,22 @@ if fotos_ativas:
                 "rotulo": rotulo
             })
 
+conhecimento_atual, msg_status, lista_docs = carregar_conhecimento()
+
+st.divider()
+rotulo_botao = "GERAR PLANO DE RETORNO E EVOLUÇÃO" if modo_atendimento == "Consulta de Retorno" else "⚡ DIAGNOSTICAR E PLANEJAR TRATAMENTO"
+gerar = st.button(rotulo_botao, type="primary", use_container_width=True, disabled=cota_esgotada)
+if cota_esgotada:
+    st.error("❌ Emissão bloqueada: cota de laudos esgotada neste ciclo.")
+
 # ================= 11. PROCESSAMENTO MULTI-CONSELHO =================
-if gerar and conhecimento_atual:
+if gerar:
     if cota_esgotada:
         st.error("Sua cota mensal de avaliações foi esgotada.")
     elif not nome:
-        st.sidebar.error("Preencha o nome do paciente.")
+        st.error("Preencha o nome do paciente no formulário acima.")
     elif not foto_repouso:
-        st.sidebar.error("A Foto 1 (Face Frontal em Repouso) é obrigatória para definir os parâmetros basais.")
+        st.error("A Foto 1 (Face Frontal em Repouso) é obrigatória para definir os parâmetros basais.")
     else:
         with st.spinner("Processando parecer com enquadramento regulatório..."):
             anamnese_dict = {
@@ -1135,60 +1074,54 @@ if st.session_state.laudo_ativo:
     st.subheader("✍️ Assinatura Digital do Paciente (TCLE)")
     st.caption("Solicite ao paciente assinar diretamente no campo abaixo usando o dedo, caneta touch ou mouse.")
     
-    col_canvas, col_acoes = st.columns([2, 1])
-    with col_canvas:
-        # Largura adaptada para 340px: cabe em qualquer celular sem vazar horizontalmente
-        canvas_result = st_canvas(
-            fill_color="rgba(255, 255, 255, 0)",
-            stroke_width=2,
-            stroke_color="#000000",
-            background_color="#FFFFFF",
-            height=140,
-            width=340,
-            drawing_mode="freedraw",
-            key="canvas_assinatura_paciente",
-        )
-        
-    with col_acoes:
-        st.write("")
-        st.write("")
-        if st.button("Gravar Assinatura no TCLE", use_container_width=True):
-            if canvas_result.image_data is not None:
-                img_data = canvas_result.image_data
-                if img_data[:, :, 3].any():
-                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
-                        caminho_tmp = tmp_file.name
-                        img_pil = Image.fromarray(img_data.astype('uint8'), 'RGBA')
-                        img_pil.save(caminho_tmp, format="PNG")
-                        
-                    novo_tcle_bytes = gerar_tcle_pdf(
-                        st.session_state.paciente_atendido,
-                        foco_avaliacao,
-                        prof,
-                        caminho_tmp
-                    )
-                    st.session_state.pdf_tcle_bytes = novo_tcle_bytes
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 255, 255, 0)",
+        stroke_width=2,
+        stroke_color="#000000",
+        background_color="#FFFFFF",
+        height=140,
+        width=320,
+        drawing_mode="freedraw",
+        key="canvas_assinatura_paciente",
+    )
+    
+    if st.button("Gravar Assinatura no TCLE", use_container_width=True):
+        if canvas_result.image_data is not None:
+            img_data = canvas_result.image_data
+            if img_data[:, :, 3].any():
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+                    caminho_tmp = tmp_file.name
+                    img_pil = Image.fromarray(img_data.astype('uint8'), 'RGBA')
+                    img_pil.save(caminho_tmp, format="PNG")
                     
-                    if st.session_state.ultimo_pront_id and st.session_state.ultimo_pac_id:
-                        _, nova_url_tcle = salvar_pdfs_storage(
-                            st.session_state.pdf_plano_bytes,
-                            novo_tcle_bytes,
-                            prof_id,
-                            st.session_state.ultimo_pac_id,
-                            st.session_state.ultimo_pront_id
-                        )
-                        if nova_url_tcle:
-                            supabase.table("prontuarios").update({"pdf_tcle_url": nova_url_tcle}).eq("id", st.session_state.ultimo_pront_id).execute()
-                            
-                    try:
-                        os.remove(caminho_tmp)
-                    except Exception:
-                        pass
+                novo_tcle_bytes = gerar_tcle_pdf(
+                    st.session_state.paciente_atendido,
+                    foco_avaliacao,
+                    prof,
+                    caminho_tmp
+                )
+                st.session_state.pdf_tcle_bytes = novo_tcle_bytes
+                
+                if st.session_state.ultimo_pront_id and st.session_state.ultimo_pac_id:
+                    _, nova_url_tcle = salvar_pdfs_storage(
+                        st.session_state.pdf_plano_bytes,
+                        novo_tcle_bytes,
+                        prof_id,
+                        st.session_state.ultimo_pac_id,
+                        st.session_state.ultimo_pront_id
+                    )
+                    if nova_url_tcle:
+                        supabase.table("prontuarios").update({"pdf_tcle_url": nova_url_tcle}).eq("id", st.session_state.ultimo_pront_id).execute()
                         
-                    st.success("Assinatura gravada com sucesso no TCLE!")
-                    st.rerun()
-                else:
-                    st.warning("Assine no quadro antes de clicar no botão.")
+                try:
+                    os.remove(caminho_tmp)
+                except Exception:
+                    pass
+                    
+                st.success("Assinatura gravada com sucesso no TCLE!")
+                st.rerun()
+            else:
+                st.warning("Assine no quadro antes de clicar no botão.")
 
     st.markdown("### 📥 Documentos para Download")
     col_d1, col_d2 = st.columns(2)
